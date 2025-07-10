@@ -22,13 +22,13 @@ namespace AGAMOTTO.WinTAKMIL
 
         public Orchestrator() 
         {
-            var config = new CsvConfiguration(CultureInfo.InvariantCulture)
+            /*var config = new CsvConfiguration(CultureInfo.InvariantCulture)
             {
                 NewLine = Environment.NewLine,
             };
 
             docPath = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments);
-            filePath = Path.Combine(docPath, "TAKOutput.csv");
+            filePath = Path.Combine(docPath, "TAKOutput.csv");*/
         }
 
 
