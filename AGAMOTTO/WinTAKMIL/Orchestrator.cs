@@ -17,18 +17,18 @@ namespace AGAMOTTO.WinTAKMIL
         //update test
         public int i = 10;
         public WinTak.Overlays.Services.IMapObjectItemManager _mapObjectItemManager { get; private set; }
-        string docPath;
+        string sAppPath;
         string filePath;
 
         public Orchestrator() 
         {
-            /*var config = new CsvConfiguration(CultureInfo.InvariantCulture)
+            var config = new CsvConfiguration(CultureInfo.InvariantCulture)
             {
                 NewLine = Environment.NewLine,
             };
 
-            docPath = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments);
-            filePath = Path.Combine(docPath, "TAKOutput.csv");*/
+            sAppPath = Environment.CurrentDirectory;
+            filePath = Path.Combine(sAppPath, "TAKOutput.csv");
         }
 
 
