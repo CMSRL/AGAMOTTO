@@ -1,0 +1,12 @@
+*.sln
+*.csproj
+*.json
+*.vsidx
+*.db-shm
+*.db
+*.db-wal
+/.vs
+*.config
+/obj
+*.nupkg
+/packages
