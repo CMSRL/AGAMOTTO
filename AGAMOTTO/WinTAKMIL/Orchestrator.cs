@@ -10,6 +10,7 @@ namespace AGAMOTTO.WinTAKMIL
 {
     internal class Orchestrator
     {
+        //update test
         public int i = 10;
         public WinTak.Overlays.Services.IMapObjectItemManager _mapObjectItemManager { get; private set; }
         public Orchestrator() { }
