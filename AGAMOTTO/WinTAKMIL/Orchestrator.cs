@@ -6,6 +6,7 @@ using System.IO;
 using System.Threading.Tasks;
 using WinTak.Overlays.Services;
 using WinTak.Overlays.ViewModels;
+using CsvHelper;
 
 namespace AGAMOTTO.WinTAKMIL
 {
@@ -19,6 +20,11 @@ namespace AGAMOTTO.WinTAKMIL
 
         public Orchestrator() 
         {
+            var config = new CsvConfiguration(CultureInfo.InvariantCulture)
+            {
+                NewLine = Environment.NewLine,
+            };
+
             docPath = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments);
             filePath = Path.Combine(docPath, "TAKOutput.csv");
         }
