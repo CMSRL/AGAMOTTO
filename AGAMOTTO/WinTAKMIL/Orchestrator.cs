@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
+using System.IO;
 using System.Threading.Tasks;
 using WinTak.Overlays.Services;
 using WinTak.Overlays.ViewModels;
@@ -13,7 +14,15 @@ namespace AGAMOTTO.WinTAKMIL
         //update test
         public int i = 10;
         public WinTak.Overlays.Services.IMapObjectItemManager _mapObjectItemManager { get; private set; }
-        public Orchestrator() { }
+        string docPath;
+        string filePath;
+
+        public Orchestrator() 
+        {
+            docPath = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments);
+            filePath = Path.Combine(docPath, "TAKOutput.csv");
+        }
+
 
         public bool CreateCSV(IMapObjectItemManager mapObjectItemManager)
         {
@@ -27,6 +36,13 @@ namespace AGAMOTTO.WinTAKMIL
                     {
                         //TestString += name.Id.ToString() + "\n";
                         //TestString += name.ChildCount.ToString() + "\n";
+                        
+                        using (var writer = new StreamWriter(filePath))
+                        using (var csv = new CsvWriter(writer, CultureInfo.InvariantCulture))
+                        {
+                            csv.WriteRecords(name);
+                        }
+
                         if (name.Id == "Hostile Markers")
                         {
                             foreach (var hostileMarker in name.Children)
