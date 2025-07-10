@@ -7,6 +7,8 @@ using System.Threading.Tasks;
 using WinTak.Overlays.Services;
 using WinTak.Overlays.ViewModels;
 using CsvHelper;
+using CsvHelper.Configuration;
+using System.Globalization;
 
 namespace AGAMOTTO.WinTAKMIL
 {
@@ -46,7 +48,7 @@ namespace AGAMOTTO.WinTAKMIL
                         using (var writer = new StreamWriter(filePath))
                         using (var csv = new CsvWriter(writer, CultureInfo.InvariantCulture))
                         {
-                            csv.WriteRecords(name);
+                            csv.WriteRecords((System.Collections.IEnumerable)name);
                         }
 
                         if (name.Id == "Hostile Markers")
