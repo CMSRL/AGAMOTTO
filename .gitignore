@@ -10,3 +10,5 @@
 /obj
 *.nupkg
 /packages
+/AGAMOTTO/AGAMOTTO Server/.idea
+/AGAMOTTO/AGAMOTTO Server/__pycache__
