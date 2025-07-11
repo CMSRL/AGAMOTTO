@@ -1,4 +1,5 @@
 ﻿
+using Spyglass.Graphics;
 using System;
 using System.Collections.Generic;
 using System.Globalization;
@@ -8,13 +9,14 @@ using System.Reflection;
 using System.Text;
 using System.Threading.Tasks;
 using System.Xml;
-
-//using System.Windows.Shapes;
+using System;
+using WinTak.Common;
 using System.Xml.Linq;
 using WinTak.Common.CoT;
 using WinTak.CursorOnTarget.Services;
 using WinTak.Overlays.Services;
 using WinTak.Overlays.ViewModels;
+using WinTak.Common.Utils;
 
 namespace AGAMOTTO.WinTAKMIL
 {
@@ -36,7 +38,7 @@ namespace AGAMOTTO.WinTAKMIL
         }
 
 
-        public bool CreateCSV(IMapObjectItemManager mapObjectItemManager)
+        public bool SendCurrentSituation(IMapObjectItemManager mapObjectItemManager)
         {
             _mapObjectItemManager = mapObjectItemManager;
             if (mapObjectItemManager.RootItems != null)
@@ -66,13 +68,16 @@ namespace AGAMOTTO.WinTAKMIL
                     // TestString += hostileMarker.MapItem.Name.ToString() + "\n";
                     //    }
                     // }
+
+
                     string cotMessage = @"<event version='2.0' uid='tcp-1234' type='a-f-G-U-C' time='2025-07-11T09:45:00Z' start='2025-07-11T09:45:00Z' stale='2025-07-11T09:50:00Z' how='m-g'>
                         <point lat='41.3739' lon='-73.9159' hae='0' ce='9999999' le='9999999'/>
                         <detail>
                         <contact callsign='TCPUnit'/>
                         </detail>
                         </event>";
-                    _coTHelper.SendCotMessage(cotMessage);
+                    var testmessage = ExportMapObjectsToXml(_mapObjectItemManager);
+                    _coTHelper.SendCotMessage(testmessage.ToString());
                 }
 
                 
@@ -82,6 +87,33 @@ namespace AGAMOTTO.WinTAKMIL
             else{
                 return false;
             }
+        }
+
+        public static XElement ExportMapObjectsToXml(IMapObjectItemManager itemManager)
+        {
+            XElement root = new XElement("MapObjects");
+
+            foreach (var item in itemManager.RootItems)
+            {
+                if (item is WinTak.Overlays.ViewModels.MapObjectItem mapObj && mapObj.MapItem != null)
+                {
+                    XElement objElement = new XElement("MapObject",
+                        new XAttribute("UID", mapObj.MapItem.Uid),
+                        new XAttribute("Type", mapObj.MapItem.GetCotType()),
+                        new XAttribute("Name", mapObj.MapItem.Name),
+                        new XElement("Position",
+                            new XAttribute("Latitude", mapObj.Position.Latitude),
+                            new XAttribute("Longitude", mapObj.Position.Longitude),
+                            new XAttribute("Altitude", mapObj.Position.Altitude)
+                        ),
+                        new XElement("Timestamp", mapObj.MapItem.ToString())
+                    );
+
+                    root.Add(objElement);
+                }
+            }
+
+            return root;
         }
 
     }

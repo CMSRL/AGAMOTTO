@@ -1,13 +1,16 @@
-﻿using System;
+﻿using MapEngine.Interop.Util;
+using Prism.Logging;
+using Spyglass.Graphics;
+using System;
 using System.Collections.Generic;
 using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
 using System.Net;
 using System.Net.Sockets;
 using System.Text;
-using MapEngine.Interop.Util;
-using Prism.Logging;
+using System.Text;
+using System.Threading.Tasks;
+using System.Xml.Linq;
+using WinTak.Overlays.Services;
 
 namespace AGAMOTTO.WinTAKMIL
 {
@@ -47,6 +50,7 @@ namespace AGAMOTTO.WinTAKMIL
                 Console.WriteLine($"Error sending CoT message: {ex.Message}");
             }
         }
+
 
         public void StartListening()
         {
