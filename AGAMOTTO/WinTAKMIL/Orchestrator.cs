@@ -1,20 +1,22 @@
-﻿using System;
+﻿
+using System;
 using System.Collections.Generic;
-using System.Linq;
-using System.Text;
+using System.Globalization;
 using System.IO;
+using System.Linq;
+using System.Reflection;
+using System.Text;
 using System.Threading.Tasks;
+//using System.Windows.Shapes;
+using System.Xml.Linq;
 using WinTak.Overlays.Services;
 using WinTak.Overlays.ViewModels;
-using CsvHelper;
-using CsvHelper.Configuration;
-using System.Globalization;
 
 namespace AGAMOTTO.WinTAKMIL
 {
     internal class Orchestrator
     {
-        //update test
+        
         public int i = 10;
         public WinTak.Overlays.Services.IMapObjectItemManager _mapObjectItemManager { get; private set; }
         string sAppPath;
@@ -22,12 +24,9 @@ namespace AGAMOTTO.WinTAKMIL
 
         public Orchestrator() 
         {
-            var config = new CsvConfiguration(CultureInfo.InvariantCulture)
-            {
-                NewLine = Environment.NewLine,
-            };
+            
 
-            sAppPath = Environment.CurrentDirectory;
+            sAppPath = Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location);
             filePath = Path.Combine(sAppPath, "TAKOutput.csv");
         }
 
@@ -40,25 +39,27 @@ namespace AGAMOTTO.WinTAKMIL
                 ICollection<MapObjectItem> rootItems = _mapObjectItemManager.RootItems;
                 if (rootItems != null)
                 {
-                    foreach (var name in rootItems)
-                    {
-                        //TestString += name.Id.ToString() + "\n";
-                        //TestString += name.ChildCount.ToString() + "\n";
-                        
-                        using (var writer = new StreamWriter(filePath))
-                        using (var csv = new CsvWriter(writer, CultureInfo.InvariantCulture))
-                        {
-                            csv.WriteRecords((System.Collections.IEnumerable)name);
-                        }
 
-                        if (name.Id == "Hostile Markers")
+
+                    using (var w = new StreamWriter(filePath))
+                    {
+                        foreach (var name in rootItems)
                         {
-                            foreach (var hostileMarker in name.Children)
-                            {
-                               // TestString += hostileMarker.MapItem.Name.ToString() + "\n";
-                            }
+                            var first = name.Id.ToString();
+                            //var second = name.MapItem.Name.ToString();
+                            var line = string.Format("{0}", first);
+                            w.WriteLine(line);
+                            w.Flush();
                         }
                     }
+
+                    //if (name.Id == "Hostile Markers")
+                   // {
+                    //    foreach (var hostileMarker in name.Children)
+                    //    {
+                            // TestString += hostileMarker.MapItem.Name.ToString() + "\n";
+                    //    }
+                   // }
 
                 }
 
