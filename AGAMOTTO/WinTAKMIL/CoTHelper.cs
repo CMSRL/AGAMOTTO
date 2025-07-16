@@ -9,7 +9,9 @@ using System.Net.Sockets;
 using System.Text;
 using System.Text;
 using System.Threading.Tasks;
+using System.Xml;
 using System.Xml.Linq;
+using WinTak.Net.Chat;
 using WinTak.Overlays.Services;
 
 namespace AGAMOTTO.WinTAKMIL
@@ -27,7 +29,7 @@ namespace AGAMOTTO.WinTAKMIL
         
         }
 
-        public void SendCotMessage(string cotXml)
+        public void SendCotMessageList(List<XDocument> cotXmlList)
         {
             //Log.i("Save/Update the value inside : ", cotXml);
             try
@@ -36,9 +38,18 @@ namespace AGAMOTTO.WinTAKMIL
                 {
                     client.Connect(_takIP, _takPort);
                     NetworkStream stream = client.GetStream();
+                    foreach(var message in cotXmlList)
+                    {
+                        string cotMessage = message.Root.ToString();
+                        int size = cotMessage.Length;
+                        byte[] sizeBuffer = BitConverter.GetBytes(size);
 
-                    byte[] bytes = Encoding.UTF8.GetBytes(cotXml);
-                    stream.Write(bytes, 0, bytes.Length);
+                        byte[] bytes = Encoding.UTF8.GetBytes(cotMessage);
+                        stream.Write(sizeBuffer, 0, 4);
+                        stream.Write(bytes, 0, bytes.Length);
+                        stream.Flush();
+                    }
+
 
                     Console.WriteLine("CoT message sent via TCP.");
 
