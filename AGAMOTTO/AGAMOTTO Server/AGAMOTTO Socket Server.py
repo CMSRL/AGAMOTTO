@@ -1,5 +1,6 @@
 import socket
 import os
+import sys
 
 from XMLHelpers import parse_cot
 
@@ -32,14 +33,18 @@ def start_server():
             with conn:
                 print(f"Connected by {addr}")
                 while True:
-                    data = conn.recv(1024).decode('utf-8')
+                    size_bytes = conn.recv(4)
+                    size_number = int.from_bytes(size_bytes, byteorder='little')
+                    #print(size_number)
+                    data = conn.recv(size_number).decode('utf-8')
+
                     if not data:
                         break
                     else:
                         xmlCoT = parse_cot(data)
                         print(xmlCoT)
                         #print(xmlCoT.get('uid'))
-                        break
+                        continue
 
 if __name__ == "__main__":
     start_server()

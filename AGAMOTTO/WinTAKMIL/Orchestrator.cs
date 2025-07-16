@@ -1,6 +1,7 @@
 ﻿
 using Spyglass.Graphics;
 using System;
+using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
@@ -9,112 +10,108 @@ using System.Reflection;
 using System.Text;
 using System.Threading.Tasks;
 using System.Xml;
-using System;
-using WinTak.Common;
 using System.Xml.Linq;
+using WinTak.Common;
 using WinTak.Common.CoT;
+using WinTak.Common.Utils;
 using WinTak.CursorOnTarget.Services;
+using WinTak.Framework.Preferences.Attributes;
+using WinTak.Net.Chat;
 using WinTak.Overlays.Services;
 using WinTak.Overlays.ViewModels;
-using WinTak.Common.Utils;
 
 namespace AGAMOTTO.WinTAKMIL
 {
     internal class Orchestrator
     {
-        
+
         public int i = 10;
         public WinTak.Overlays.Services.IMapObjectItemManager _mapObjectItemManager { get; private set; }
         private CoTHelper _coTHelper { get; set; }
         string sAppPath;
         string filePath;
 
-        public Orchestrator() 
+        public Orchestrator()
         {
 
             _coTHelper = new CoTHelper("127.0.0.1", 65432);
-            sAppPath = Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location);
-            filePath = Path.Combine(sAppPath, "TAKOutput.csv");
+            // sAppPath = Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location);
+            //filePath = Path.Combine(sAppPath, "TAKOutput.csv");
         }
 
 
-        public bool SendCurrentSituation(IMapObjectItemManager mapObjectItemManager)
+        public bool SendCurrentSituation(IMapObjectItemManager mapObjectItemManager, string userInputIP)
         {
+            ///_coTHelper = new CoTHelper(userInputIP, 65432);
             _mapObjectItemManager = mapObjectItemManager;
             if (mapObjectItemManager.RootItems != null)
             {
-                ICollection<MapObjectItem> rootItems = _mapObjectItemManager.RootItems;
-                if (rootItems != null)
-                {
+
+                var testmessage = ExportMapObjectsToXml(mapObjectItemManager.RootItems);
+                _coTHelper.SendCotMessageList(testmessage);
 
 
-                    using (var w = new StreamWriter(filePath))
-                    {
-                        foreach (var name in rootItems)
-                        {
-                            var first = name.Id.ToString();
-                            //var second = name.MapItem.Name.ToString();
-                            var line = string.Format("{0}", first);
-                            w.WriteLine(line);
-                            w.Flush();
-                        }
-                    }
-
-
-                    //if (name.Id == "Hostile Markers")
-                    // {
-                    //    foreach (var hostileMarker in name.Children)
-                    //    {
-                    // TestString += hostileMarker.MapItem.Name.ToString() + "\n";
-                    //    }
-                    // }
-
-
-                    string cotMessage = @"<event version='2.0' uid='tcp-1234' type='a-f-G-U-C' time='2025-07-11T09:45:00Z' start='2025-07-11T09:45:00Z' stale='2025-07-11T09:50:00Z' how='m-g'>
-                        <point lat='41.3739' lon='-73.9159' hae='0' ce='9999999' le='9999999'/>
-                        <detail>
-                        <contact callsign='TCPUnit'/>
-                        </detail>
-                        </event>";
-                    var testmessage = ExportMapObjectsToXml(_mapObjectItemManager);
-                    _coTHelper.SendCotMessage(testmessage.ToString());
-                }
-
-                
                 return true;
 
             }
-            else{
+            else
+            {
                 return false;
             }
+            
         }
 
-        public static XElement ExportMapObjectsToXml(IMapObjectItemManager itemManager)
+        public static List<XDocument> ExportMapObjectsToXml(ICollection<MapObjectItem> rootItems)
         {
-            XElement root = new XElement("MapObjects");
-
-            foreach (var item in itemManager.RootItems)
+            
+            var cotMessages = new List<XDocument>();
+            foreach (var item in rootItems)
             {
-                if (item is WinTak.Overlays.ViewModels.MapObjectItem mapObj && mapObj.MapItem != null)
+                if(item != null)
                 {
-                    XElement objElement = new XElement("MapObject",
-                        new XAttribute("UID", mapObj.MapItem.Uid),
-                        new XAttribute("Type", mapObj.MapItem.GetCotType()),
-                        new XAttribute("Name", mapObj.MapItem.Name),
-                        new XElement("Position",
-                            new XAttribute("Latitude", mapObj.Position.Latitude),
-                            new XAttribute("Longitude", mapObj.Position.Longitude),
-                            new XAttribute("Altitude", mapObj.Position.Altitude)
-                        ),
-                        new XElement("Timestamp", mapObj.MapItem.ToString())
-                    );
+                    foreach (var child in item.Children)
+                    {
+                        if(child.MapItem != null)
+                        {
+                            string uid = child.MapItem.Uid ?? "none";
+                            string type = child.MapItem.GetCotType() ?? "a-f-G-U-C"; // Default to combat unit if type is null
+                            DateTime time = DateTime.UtcNow;
+                            double? lat = child.Position.Latitude;
+                            double? lon = child.Position.Longitude;
+                            double? hae = child.Position.Altitude;
 
-                    root.Add(objElement);
+                            var cotEvent = new XElement("event",
+                                new XAttribute("version", "2.0"),
+                                new XAttribute("uid", uid),
+                                new XAttribute("type", type),
+                                new XAttribute("how", "m-g"),
+                                new XAttribute("time", time.ToString("o")),
+                                new XAttribute("start", time.ToString("o")),
+                                new XAttribute("stale", time.AddMinutes(5).ToString("o")),
+                                new XElement("point",
+                                    new XAttribute("lat", lat),
+                                    new XAttribute("lon", lon),
+                                    new XAttribute("hae", hae),
+                                    new XAttribute("ce", "30.0"),   // Customize error if needed
+                                    new XAttribute("le", "30.0")
+                                ),
+                                new XElement("detail",
+                                    new XElement("contact", new XAttribute("callsign", child.MapItem.Name)),
+                                    new XElement("remarks", $"Generated from WinTAK at {time}")
+                                )
+                            );
+
+                            cotMessages.Add(new XDocument(new XDeclaration("1.0", "UTF-8", "yes"), cotEvent));
+                        }
+
+                    }
                 }
+
+
+
+                
             }
-
-            return root;
+            return cotMessages;
         }
-
     }
 }
