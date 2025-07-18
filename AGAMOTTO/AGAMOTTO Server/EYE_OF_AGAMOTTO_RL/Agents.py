@@ -52,6 +52,7 @@ class CommandAgent:
         self,
         env
     ):
+        self.env = env
         self.BATCH_SIZE=128
         self.GAMMA = 0.99
         self.EPS_START = 0.9
@@ -67,11 +68,11 @@ class CommandAgent:
             "cpu"
         )
 
-        self.action_mapping = self._create_action_mapping(),
-
+        #self.action_mapping = self._create_action_mapping(),
+        obs, _ = self.env.reset()
         # Initialize networks, optimizers, and memories for each agent
-        self.POLICY_NET = DQN(len(env.obs), len(self.action_mapping)).to(self.device)
-        self.TARGET_NET = DQN(len(env.obs), len(self.action_mapping)).to(self.device)
+        self.POLICY_NET = DQN(len(obs), self.env.action_space.n).to(self.device)
+        self.TARGET_NET = DQN(len(obs), self.env.action_space.n).to(self.device)
         self.OPTIMIZER = optim.AdamW(self.POLICY_NET.parameters(), lr=self.LR, amsgrad=True)
         self.MEMORIES = ReplayMemory(10000)
 
@@ -86,36 +87,24 @@ class CommandAgent:
         return action_mapping
 
     def action_space(self):
-        actions = []
+        actions = self.env.action_space
         ##UPDATEEEEEEE
         return actions
 
     # Define action selection function
-    def select_action(self, state, use_action_mask):
-        action_mask = use_action_mask
+    def select_action(self, state):
 
         # Epsilon-greedy action selection with masking
         if np.random.random() < self.epsilon:
             # Random action selection
-            if use_action_mask:
-                # Only select from valid actions
-                valid_actions = np.nonzero(action_mask == 1)[0]
-                action = np.random.choice(valid_actions)
-            else:
                 # Select from all actions
-                action = np.random.randint(0, len(self.action_space()))
+                action = np.random.randint(0, self.env.action_space.n)
         else:
             # Greedy action selection
-            if use_action_mask:
-                # Only consider valid actions for exploitation
-                valid_actions = np.nonzero(action_mask == 1)[0]
-                if len(valid_actions) > 0:
-                    action = self.POLICY_NET(state).max(1).indices.view(1, 1) #need to update to filter valid actions
-                else:
-                    action = np.random.randint(0, len(self.action_space()))
-            else:
                 # Consider all actions
-                action = self.POLICY_NET(state).max(1).indices.view(1, 1)
+                action = np.random.randint(0, self.env.action_space.n)
+                #action = self.POLICY_NET(torch.from_numpy(state).max(1).indices.view(1, ))
+        return action
 
     def optimize_model(self):
         if len(self.MEMORIES) < self.BATCH_SIZE:
