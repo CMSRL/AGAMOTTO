@@ -1,5 +1,10 @@
 import gymnasium as gym
 import numpy as np
+import ale_py
+import torch
+import torch.nn as nn
+import torch.optim as optim
+import torch.nn.functional as F
 
 from EYE_OF_AGAMOTTO_RL.Agents import CommandAgent
 
@@ -7,10 +12,11 @@ from EYE_OF_AGAMOTTO_RL.Agents import CommandAgent
 # Base random seed for reproducibility
 BASE_RANDOM_SEED = 58922320
 
-env = gym.make("CarRacing-v3", render_mode="rgb_array", lap_complete_percent=0.95, domain_randomize=False, continuous=False)
+#env = gym.make("ALE/Adventure-v5")
+
 
 # normal reset, this changes the colour scheme by default
-obs, _ = env.reset()
+#obs, _ = env.reset()
 
 def train_q_learning(
     env,
@@ -30,7 +36,7 @@ def train_q_learning(
         max_t = 1000  # Maximum steps per episode
         for t in range(max_t):
             # Take action and observe result
-            action = commandAgent.select_action(state, use_action_mask=use_action_mask)
+            action = commandAgent.select_action(state)
             next_state, reward, done, truncated, info = env.step(action)
             total_reward += reward
 
@@ -49,8 +55,16 @@ def train_q_learning(
 
 # Experiment parameters
 n_runs = 12
-episodes = 5000
 
+
+device = torch.device(
+    "cuda" if torch.cuda.is_available() else
+    "mps" if torch.backends.mps.is_available() else
+    "cpu"
+)
+
+if device.type == "cuda": episodes = 5000
+else: episodes = 50
 
 # Generate different seeds for each run
 seeds = [BASE_RANDOM_SEED + i for i in range(n_runs)]
@@ -63,19 +77,8 @@ unmasked_results_list = []
 for i, seed in enumerate(seeds):
     print(f"Run {i + 1}/{n_runs} with seed {seed}")
 
-    # Train agent WITH action masking
-    env_masked = gym.make("Taxi-v3")
-    masked_results = train_q_learning(
-        env_masked,
-        use_action_mask=True,
-        seed=seed,
-        episodes=episodes,
-    )
-    env_masked.close()
-    masked_results_list.append(masked_results)
-
     # Train agent WITHOUT action masking
-    env_unmasked = gym.make("Taxi-v3")
+    env_unmasked = gym.make("ALE/Adventure-v5")
     unmasked_results = train_q_learning(
         env_unmasked,
         use_action_mask=False,
@@ -85,5 +88,4 @@ for i, seed in enumerate(seeds):
     env_unmasked.close()
     unmasked_results_list.append(unmasked_results)
 
-env.close()
 
