@@ -12,3 +12,7 @@
 /packages
 /AGAMOTTO/AGAMOTTO Server/.idea
 /AGAMOTTO/AGAMOTTO Server/__pycache__
+/AGAMOTTO/AGAMOTTO Server/EYE_OF_AGAMOTTO_RL/__pycache__
+/AGAMOTTO/AGAMOTTO Server/EYE_OF_AGAMOTTO_RL/__pycache__
+/AGAMOTTO/AGAMOTTO Server/EYE_OF_AGAMOTTO_RL/__pycache__
+*.pyc
