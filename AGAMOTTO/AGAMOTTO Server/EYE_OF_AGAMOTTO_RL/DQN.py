@@ -25,6 +25,24 @@ class ReplayMemory(object):
     def __len__(self):
         return len(self.memory)
 
+
+# Replay Buffer
+class ReplayBuffer:
+    def __init__(self, capacity):
+        self.buffer = deque(maxlen=capacity)
+
+    def push(self, transition):
+        self.buffer.append(transition)
+
+    def sample(self, batch_size):
+        batch = random.sample(self.buffer, batch_size)
+        states, actions, rewards, next_states, dones = zip(*batch)
+        return (np.stack(states), actions, rewards, np.stack(next_states), dones)
+
+    def __len__(self):
+        return len(self.buffer)
+
+
 class DQN(nn.Module):
     """Deep Q-Network"""
 
@@ -38,3 +56,36 @@ class DQN(nn.Module):
         x = F.relu(self.layer1(x))
         x = F.relu(self.layer2(x))
         return self.layer3(x)
+
+
+
+
+class ConvDQN(nn.Module):
+    def __init__(self, action_space):
+        super(ConvDQN, self).__init__()
+        self.conv = nn.Sequential(
+            nn.Conv2d(4, 32, kernel_size=8, stride=4),
+            nn.ReLU(),
+            nn.Conv2d(32, 64, kernel_size=4, stride=2),
+            nn.ReLU(),
+            nn.Conv2d(64, 64, kernel_size=3, stride=1),
+            nn.ReLU()
+        )
+
+        # Dynamically compute the size of the linear input
+        with torch.no_grad():
+            dummy_input = torch.zeros(1, 4, 84, 84)
+            conv_out = self.conv(dummy_input)
+            self.linear_input_size = conv_out.view(1, -1).size(1)
+
+        self.fc = nn.Sequential(
+            nn.Linear(self.linear_input_size, 512),
+            nn.ReLU(),
+            nn.Linear(512, action_space)
+        )
+
+    def forward(self, x):
+        x = self.conv(x)
+        x = x.view(x.size(0), -1)
+        return self.fc(x)
+

@@ -1,13 +1,32 @@
 import numpy as np
 import random
+import cv2
 from collections import namedtuple, deque
 import torch
 import torch.nn as nn
 import torch.optim as optim
-import torch.nn.functional as F
-from EYE_OF_AGAMOTTO_RL.DQN import DQN
-from EYE_OF_AGAMOTTO_RL.DQN import ReplayMemory
-Transition = namedtuple('Transition', ('state', 'action', 'next_state', 'reward'))
+import gymnasium as gym
+from EYE_OF_AGAMOTTO_RL.DQN import ConvDQN
+from EYE_OF_AGAMOTTO_RL.DQN import ReplayBuffer
+from tqdm import tqdm
+
+
+
+# Preprocessing function
+def preprocess(obs):
+    obs = cv2.cvtColor(obs, cv2.COLOR_RGB2GRAY)
+    obs = cv2.resize(obs, (84, 84))
+    return obs / 255.0
+
+    # Epsilon-greedy action selection
+
+# Epsilon-greedy action selection
+def select_action(state, policy_net, epsilon, action_space, device):
+    if random.random() < epsilon:
+        return random.randrange(action_space)
+    with torch.no_grad():
+        state = torch.tensor(state, dtype=torch.float32).unsqueeze(0).to(device)
+        return policy_net(state).argmax().item()
 
 
 class PlayerAgent:
@@ -20,104 +39,85 @@ class PlayerAgent:
 
 class CommandAgent:
     def __init__(
-        self,
-        env
+        self
     ):
-        self.env = env
-        self.BATCH_SIZE=128
+
         self.GAMMA = 0.99
-        self.EPS_START = 0.9
-        self.EPS_END = 0.05
-        self.EPS_DECAY = 1000
-        self.TAU = 0.005
         self.LR = 1e-4
-        self.epsilon = 0.1
+        self.BATCH_SIZE = 32
+        self.MEMORY_SIZE = 100_000
+        self.EPS_START = 1.0
+        self.EPS_END = 0.1
+        self.EPS_DECAY = 1_000_000
+        self.TARGET_UPDATE = 10_000
+        self.DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-        self.device = torch.device(
-            "cuda" if torch.cuda.is_available() else
-            "mps" if torch.backends.mps.is_available() else
-            "cpu"
-        )
+    # Main training loop
+    def train(self, game_type, num_episodes):
+        env = gym.make(game_type, render_mode="human", frameskip=4)
+        action_space = env.action_space.n
 
-        #self.action_mapping = self._create_action_mapping(),
-        obs, _ = self.env.reset()
-        # Initialize networks, optimizers, and memories for each agent
-        flattened_observation = obs.flatten()
-        self.POLICY_NET = DQN(len(flattened_observation), self.env.action_space.n).to(self.device)
-        self.TARGET_NET = DQN(len(flattened_observation), self.env.action_space.n).to(self.device)
-        self.OPTIMIZER = optim.AdamW(self.POLICY_NET.parameters(), lr=self.LR, amsgrad=True)
-        self.MEMORIES = ReplayMemory(10000)
+        policy_net = ConvDQN(action_space).to(self.DEVICE)
+        target_net = ConvDQN(action_space).to(self.DEVICE)
+        target_net.load_state_dict(policy_net.state_dict())
+        target_net.eval()
 
-        # Copy policy network parameters to target networks
-        self.TARGET_NET.load_state_dict(self.POLICY_NET.state_dict())
+        optimizer = optim.Adam(policy_net.parameters(), lr=self.LR)
+        memory = ReplayBuffer(self.MEMORY_SIZE)
 
+        epsilon = self.EPS_START
+        steps_done = 0
+        state_stack = deque(maxlen=4)
 
+        for episode in tqdm(range(1, num_episodes+1)):
+            obs, _ = env.reset()
+            frame = preprocess(obs)
+            state_stack.clear()
+            state_stack.extend([frame] * 4)
+            total_reward = 0
 
-    def _create_action_mapping(self):
-        actions = self.action_space()
-        action_mapping = {i: action for i, action in enumerate(actions)}
-        return action_mapping
+            while True:
+                state = np.stack(state_stack, axis=0)
+                action = select_action(state, policy_net, epsilon, action_space, self.DEVICE)
+                next_obs, reward, terminated, truncated, _ = env.step(action)
+                done = terminated or truncated
+                next_frame = preprocess(next_obs)
+                state_stack.append(next_frame)
+                next_state = np.stack(state_stack, axis=0)
 
-    def action_space(self):
-        actions = self.env.action_space
-        ##UPDATEEEEEEE
-        return actions
+                memory.push((state, action, reward, next_state, done))
+                total_reward += reward
 
-    # Define action selection function
-    def select_action(self, state):
+                if len(memory) >= self.BATCH_SIZE:
+                    states, actions, rewards, next_states, dones = memory.sample(self.BATCH_SIZE)
 
-        # Epsilon-greedy action selection with masking
-        if np.random.random() < self.epsilon:
-            # Random action selection
-                # Select from all actions
-                action = np.random.randint(0, self.env.action_space.n)
-        else:
-            # Greedy action selection
-                # Consider all actions
-                #action = np.random.randint(0, self.env.action_space.n)
-                #action = self.POLICY_NET(torch.from_numpy(state).max(1).indices.view(1, ))
-            flattened_observation = state.flatten()
-            state_tensor = torch.from_numpy(flattened_observation).float().unsqueeze(0).to(
-                self.device) # add batch dimension and move to device
-            q_values = self.POLICY_NET(state_tensor)  # forward pass
-            action = torch.argmax(q_values, dim=1).item()  # select action
-        return action
+                    states = torch.tensor(states, dtype=torch.float32).to(self.DEVICE)
+                    actions = torch.tensor(actions, dtype=torch.long).unsqueeze(1).to(self.DEVICE)
+                    rewards = torch.tensor(rewards, dtype=torch.float32).unsqueeze(1).to(self.DEVICE)
+                    next_states = torch.tensor(next_states, dtype=torch.float32).to(self.DEVICE)
+                    dones = torch.tensor(dones, dtype=torch.float32).unsqueeze(1).to(self.DEVICE)
 
-    def optimize_model(self):
-        if len(self.MEMORIES) < self.BATCH_SIZE:
-            return
-        transitions = self.MEMORIES.sample(self.BATCH_SIZE)
-        batch = Transition(*zip(*transitions))
+                    q_values = policy_net(states).gather(1, actions)
+                    next_q_values = target_net(next_states).max(1)[0].detach().unsqueeze(1)
+                    expected_q_values = rewards + self.GAMMA * next_q_values * (1 - dones)
 
-        # Mask to filter out final states
-        non_final_mask = torch.tensor(tuple(map(lambda s: s is not None,
-                                                batch.next_state)), device=self.device, dtype=torch.bool)
-        # Concatenate the non-final next states
-        non_final_next_states = torch.cat([s for s in batch.next_state if s is not None])
-        state_batch = torch.cat(batch.state)
-        action_batch = torch.cat(batch.action)
-        reward_batch = torch.cat(batch.reward)
+                    loss = nn.MSELoss()(q_values, expected_q_values)
+                    optimizer.zero_grad()
+                    loss.backward()
+                    optimizer.step()
 
-        # Compute Q(s_t, a)
-        state_action_values = self.POLICY_NET(state_batch).gather(1, action_batch)
+                    if steps_done % self.TARGET_UPDATE == 0:
+                        target_net.load_state_dict(policy_net.state_dict())
 
-        # Compute V(s_{t+1})
-        next_state_values = torch.zeros(self.BATCH_SIZE, device=self.device)
-        with torch.no_grad():
-            next_state_values[non_final_mask] = self.TARGET_NET(non_final_next_states).max(1).values
-        # Compute expected Q values
-        expected_state_action_values = (next_state_values * self.GAMMA) + reward_batch
+                steps_done += 1
+                epsilon = max(self.EPS_END, self.EPS_START - steps_done / self.EPS_DECAY)
 
-        # Compute loss
-        criterion = nn.SmoothL1Loss()
-        loss = criterion(state_action_values, expected_state_action_values.unsqueeze(1))
+                if done:
+                    print(f"Episode {episode}, Total Reward: {total_reward}, Epsilon: {epsilon:.3f}")
+                    break
 
-        # Optimize the model
-        self.OPTIMIZER.zero_grad()
-        loss.backward()
-        torch.nn.utils.clip_grad_value_(self.POLICY_NET.parameters(), 100)
-        self.OPTIMIZER.step()
-        return loss.item()
+        env.close()
+
 
 class BlueAgent(PlayerAgent):
     def __init__(self, agent_id, team = ""):
