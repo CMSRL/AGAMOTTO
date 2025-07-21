@@ -2,18 +2,51 @@ import gymnasium as gym
 import numpy as np
 import ale_py
 import torch
+import matplotlib.pyplot as plt
 import torch.nn as nn
 import torch.optim as optim
 import torch.nn.functional as F
+import math
+import random
+import matplotlib
+from collections import namedtuple, deque
+from itertools import count
+import time
+from tqdm import tqdm
+
+is_ipython = 'inline' in matplotlib.get_backend()
+if is_ipython:
+    from IPython import display
 
 from EYE_OF_AGAMOTTO_RL.Agents import CommandAgent
-
 
 # Base random seed for reproducibility
 BASE_RANDOM_SEED = 58922320
 
 #env = gym.make("ALE/Adventure-v5")
+# Plotting function
+def plot_durations(reward_list, show_result=False):
+    plt.figure(1)
+    plt.clf()
 
+
+    if show_result:
+        plt.title('Result')
+    else:
+        plt.title('Training...')
+
+    plt.xlabel('Episode')
+    plt.ylabel('Reward')
+    plt.plot(reward_list, label=f"Agent")
+
+    plt.legend()
+    plt.pause(0.001)
+    if is_ipython:
+        if not show_result:
+            display.display(plt.gcf())
+            display.clear_output(wait=True)
+        else:
+            display.display(plt.gcf())
 
 # normal reset, this changes the colour scheme by default
 #obs, _ = env.reset()
@@ -46,7 +79,7 @@ def train_q_learning(
 
             if done or truncated:
                 break
-
+    print(episode_rewards)
     return {
         "episode_rewards": episode_rewards,
         "mean_reward": np.mean(episode_rewards),
@@ -64,7 +97,7 @@ device = torch.device(
 )
 
 if device.type == "cuda": episodes = 5000
-else: episodes = 50
+else: episodes = 5
 
 # Generate different seeds for each run
 seeds = [BASE_RANDOM_SEED + i for i in range(n_runs)]
@@ -87,5 +120,6 @@ for i, seed in enumerate(seeds):
     )
     env_unmasked.close()
     unmasked_results_list.append(unmasked_results)
+
 
 
