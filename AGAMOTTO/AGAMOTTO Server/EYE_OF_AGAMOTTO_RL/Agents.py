@@ -5,39 +5,10 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 import torch.nn.functional as F
-
+from EYE_OF_AGAMOTTO_RL.DQN import DQN
+from EYE_OF_AGAMOTTO_RL.DQN import ReplayMemory
 Transition = namedtuple('Transition', ('state', 'action', 'next_state', 'reward'))
 
-class ReplayMemory(object):
-    """Replay Memory to store past experiences for training"""
-
-    def __init__(self, capacity):
-        self.memory = deque([], maxlen=capacity)
-
-    def push(self, *args):
-        """Save a transition"""
-        self.memory.append(Transition(*args))
-
-    def sample(self, batch_size):
-        """Sample a batch of experiences"""
-        return random.sample(self.memory, batch_size)
-
-    def __len__(self):
-        return len(self.memory)
-
-class DQN(nn.Module):
-    """Deep Q-Network"""
-
-    def __init__(self, n_observations, n_actions):
-        super(DQN, self).__init__()
-        self.layer1 = nn.Linear(n_observations, 128)
-        self.layer2 = nn.Linear(128, 128)
-        self.layer3 = nn.Linear(128, n_actions)
-
-    def forward(self, x):
-        x = F.relu(self.layer1(x))
-        x = F.relu(self.layer2(x))
-        return self.layer3(x)
 
 class PlayerAgent:
     def __init__(self, agent_id, network_zone, team = ""):
@@ -71,8 +42,9 @@ class CommandAgent:
         #self.action_mapping = self._create_action_mapping(),
         obs, _ = self.env.reset()
         # Initialize networks, optimizers, and memories for each agent
-        self.POLICY_NET = DQN(len(obs), self.env.action_space.n).to(self.device)
-        self.TARGET_NET = DQN(len(obs), self.env.action_space.n).to(self.device)
+        flattened_observation = obs.flatten()
+        self.POLICY_NET = DQN(len(flattened_observation), self.env.action_space.n).to(self.device)
+        self.TARGET_NET = DQN(len(flattened_observation), self.env.action_space.n).to(self.device)
         self.OPTIMIZER = optim.AdamW(self.POLICY_NET.parameters(), lr=self.LR, amsgrad=True)
         self.MEMORIES = ReplayMemory(10000)
 
@@ -102,8 +74,13 @@ class CommandAgent:
         else:
             # Greedy action selection
                 # Consider all actions
-                action = np.random.randint(0, self.env.action_space.n)
+                #action = np.random.randint(0, self.env.action_space.n)
                 #action = self.POLICY_NET(torch.from_numpy(state).max(1).indices.view(1, ))
+            flattened_observation = state.flatten()
+            state_tensor = torch.from_numpy(flattened_observation).float().unsqueeze(0).to(
+                self.device) # add batch dimension and move to device
+            q_values = self.POLICY_NET(state_tensor)  # forward pass
+            action = torch.argmax(q_values, dim=1).item()  # select action
         return action
 
     def optimize_model(self):
