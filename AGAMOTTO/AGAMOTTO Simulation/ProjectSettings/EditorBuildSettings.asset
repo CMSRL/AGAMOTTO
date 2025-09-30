@@ -1,0 +1,209 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!1045 &1
+EditorBuildSettings:
+  m_ObjectHideFlags: 0
+  serializedVersion: 2
+  m_Scenes:
+  - enabled: 1
+    path: Assets/Scenes/LevelSelect.unity
+    guid: 65bba915b64439247b5362b3b2dabd7e
+  - enabled: 1
+    path: Assets/Ride/Examples/BattleDrills/BattleDrill_CoverAndConcealment.unity
+    guid: 7a01073dde6a1a14cb69ee2f13f21384
+  - enabled: 1
+    path: Assets/Ride/Examples/BattleDrills/BattleDrill_ReactToAmbush.unity
+    guid: c07660e4b9b90524d80920e7a09fb1fd
+  - enabled: 1
+    path: Assets/Ride/Examples/Network/TeamMatch/ExampleTeamMatch_Korabela.unity
+    guid: a593eabe6ef72fd459294f91a50f9c00
+  - enabled: 1
+    path: Assets/Ride/Examples/Network/TeamMatch/ExampleTeamMatch_RedBeach.unity
+    guid: 519c592b2657ab64a83b887b8fb8ebd9
+  - enabled: 1
+    path: Assets/Ride/Examples/Network/TeamMatch/ExampleTeamMatch_Razish.unity
+    guid: ffe42075ae6bf1349b5c9a1fcc7bcab0
+  - enabled: 1
+    path: Assets/Ride/Examples/Network/TeamMatch/ExampleTeamMatch_OCCC.unity
+    guid: 15ae6f3e332b9fe4e9925cc56e123987
+  - enabled: 1
+    path: Assets/Ride/Examples/Network/TeamMatch/ExampleTeamMatch_USC.unity
+    guid: e10c3aca74952094eb2cabc94f0fbb7c
+  - enabled: 1
+    path: Assets/Ride/Examples/Network/TeamMatch/ExampleTeamMatch_Yuma.unity
+    guid: d90f7064a665aea4e9b1fb493dd684ec
+  - enabled: 1
+    path: Assets/Ride/Examples/Network/TeamMatch/ExampleTeamMatch_FtHoodDriving.unity
+    guid: e1382c878f2d66b4db0e1446a051cc7c
+  - enabled: 1
+    path: Assets/Ride/Examples/Network/TeamMatch/ExampleTeamMatch_YumaDriving.unity
+    guid: b789e9375c197684f81e9364ecd6608f
+  - enabled: 1
+    path: Assets/Ride/Examples/Behaviours/ExampleAgentBehaviours.unity
+    guid: d8f47e581eb66394d92085403cffe39f
+  - enabled: 1
+    path: Assets/Ride/Examples/AgentCommands/ExampleAgentCommands.unity
+    guid: b4da4001ecd715d44aaa4ed3673449a4
+  - enabled: 1
+    path: Assets/Ride/Examples/AgentCommands/ExampleAgentCommandsEchelonFormationMovement.unity
+    guid: 06d6f35d86533b2499ef0c956c85f6ea
+  - enabled: 1
+    path: Assets/Ride/Examples/AgentCommands/ExampleAgentCommandsFormationMovement.unity
+    guid: 2e46dce9f513846448c21eceb0172547
+  - enabled: 1
+    path: Assets/Ride/Examples/AgentCommands/ExampleAgentCommandsFormationMovement_Korabela.unity
+    guid: 565403b9193657842804e125a922a4ed
+  - enabled: 1
+    path: Assets/Ride/Examples/ApiFunctions/ExampleApiFunctions.unity
+    guid: ce547ca047e8ce74e8dc8cce1e218325
+  - enabled: 1
+    path: Assets/Ride/Examples/ApiFunctions/ExampleApiFunctionsVHMsg.unity
+    guid: b8f829e69ba8e2d44a09d913c4a5b1b1
+  - enabled: 1
+    path: Assets/Ride/Examples/AstarPathing/ExampleAstarPathing.unity
+    guid: a121f99e912f02847a1da76d67179cd3
+  - enabled: 1
+    path: Assets/Ride/Examples/Behaviours/AgentBehaviours/ExampleBehaviourComparison.unity
+    guid: 1f806a1f805d54f4c80ca0707977f51e
+  - enabled: 1
+    path: Assets/Ride/Examples/Combat/ExampleCombat.unity
+    guid: 8cbf2ca61cfdf154b9a0e44bb595825e
+  - enabled: 1
+    path: Assets/Ride/Examples/CustomAgentAnimations/ExampleCustomAgentAnimations.unity
+    guid: 9f65c9d5f52bfed44a4b41a5262c9df5
+  - enabled: 1
+    path: Assets/Ride/Examples/Services/DIS/ExampleDIS.unity
+    guid: 745062b485620554799bdabf5f5da06d
+  - enabled: 1
+    path: Assets/Ride/Examples/GroundClassificationWeather/ExampleGroundClassificationWeather.unity
+    guid: ea68a548a9999b0479b1841cbc2b5ca0
+  - enabled: 1
+    path: Assets/Ride/Examples/Sensing/ExampleFace.unity
+    guid: 7bf1dc1ed8ad308479304426f83fc2ad
+  - enabled: 1
+    path: Assets/Ride/Examples/Groups/ExampleGroups.unity
+    guid: 9cdaaf193d035514f82533cc1ce85fe1
+  - enabled: 1
+    path: Assets/Ride/Examples/Behaviours/GroupBehaviours/ExampleGroupBehaviours.unity
+    guid: 4b3c935f3388b654e962c788ce11a787
+  - enabled: 1
+    path: Assets/Ride/Examples/UI/Hud/ExampleHud.unity
+    guid: 446030e759455494d8d4ca59ff03f0ad
+  - enabled: 1
+    path: Assets/Ride/Examples/Services/Interpretation/ExampleInterpretationSystem.unity
+    guid: a8dd1def5ba5747518eb242006b1e056
+  - enabled: 1
+    path: Assets/Ride/Examples/ImageGeneration/ExampleImageGeneration.unity
+    guid: a8e9f35aad8db4344947876d2c1284da
+  - enabled: 1
+    path: Assets/Ride/Examples/NLP/ExampleLLM/ExampleLLM.unity
+    guid: 1d865a4b93ef0bf4eab5684545eb4f4b
+  - enabled: 1
+    path: Assets/Ride/Examples/LoadTerrain/ExampleLoadTerrain.unity
+    guid: f1b7d2e2aee92c540ae6cbf296700971
+  - enabled: 1
+    path: Assets/Ride/Examples/Logging/ExampleLogging.unity
+    guid: 29b28c5992554ed4cbb8e9a03a0337bc
+  - enabled: 1
+    path: Assets/Ride/Examples/LOS/ExampleLOS.unity
+    guid: a6de550109460be479bb4a890a287130
+  - enabled: 1
+    path: Assets/Ride/Examples/MilitaryUnits/ExampleMilitaryUnits.unity
+    guid: a3d547560e4e05e4d854c82e09610979
+  - enabled: 1
+    path: Assets/Ride/Examples/Movement/ExampleMovement.unity
+    guid: 3cf0c06ca0d9d784e9064a8f1672b46d
+  - enabled: 1
+    path: Assets/Ride/Examples/Scenarios/ExampleMSELI.unity
+    guid: 6e290207a267ff14bb90a23e7eb9ce6e
+  - enabled: 1
+    path: Assets/Ride/Examples/NLP/ExampleNLP.unity
+    guid: aa675483b7f57d04fa6d75fa39161d33
+  - enabled: 1
+    path: Assets/Ride/Examples/Notifications/ExampleNotification.unity
+    guid: 2e0a81f5796c5ea4a8f7aae3edf959c4
+  - enabled: 1
+    path: Assets/Ride/Examples/OrdnanceMenu/ExampleOrdnanceMenu.unity
+    guid: a6a4361a3fd569f4aa9e1cf296d8ba21
+  - enabled: 1
+    path: Assets/Ride/Examples/Behaviours/SeekAndDestroyBot/ExamplePatrolAndAttackBot.unity
+    guid: db309b92c25b6b44788481e3fe54e5b6
+  - enabled: 1
+    path: Assets/Ride/Examples/SelectFire/ExampleSelectFire.unity
+    guid: b4ceb5966e981f94f9eda1bba446eb24
+  - enabled: 1
+    path: Assets/Ride/Examples/Network/SimpleControls/SimpleNetworkExample.unity
+    guid: 3c66bdbd04c5cb7468d4f213bd058da2
+  - enabled: 1
+    path: Assets/Ride/Examples/Services/Sockets/ExampleSockets.unity
+    guid: 069873689235ebe41ac1dff5e957a4b9
+  - enabled: 1
+    path: Assets/Ride/Examples/StateMachine/ExampleStateMachine.unity
+    guid: 518dc9bea93353d4da1d06ce74429e86
+  - enabled: 1
+    path: Assets/Ride/Examples/Scenarios/RescueAtKorabela/RescueAtKorabela.unity
+    guid: 629b59faf69e54924931c77a0cc4dcaa
+  - enabled: 1
+    path: Assets/Ride/Examples/Services/REST/ExampleRest.unity
+    guid: a0fcba846f352894db26241cc173cde4
+  - enabled: 1
+    path: Assets/Ride/Examples/Services/REST_New/ExampleRestNew.unity
+    guid: a5e4e5d279b9dc14792e08277660a78b
+  - enabled: 1
+    path: Assets/Ride/Examples/TerrainDestructionYuma/ExampleTerrainDestructionYuma.unity
+    guid: 46bfff72e53de934abb385be4aed28e8
+  - enabled: 1
+    path: Assets/Ride/Examples/PlayerInputController/PlayerInputController.unity
+    guid: dda260809f0441445ba1f3269459fd17
+  - enabled: 1
+    path: Assets/Ride/Examples/Scenarios/RazishTAB.unity
+    guid: f54d756bb79511d4d9e2a529059303ac
+  - enabled: 1
+    path: Assets/Ride/Examples/Scenarios/RazishTour/RazishTour.unity
+    guid: ae01b59fc3b334ee2879e87163662c72
+  - enabled: 1
+    path: Assets/Ride/Examples/Tags/ExampleTags.unity
+    guid: 30b8d4a7e85dbfa4f84bf76a27b46891
+  - enabled: 1
+    path: Assets/Ride/Examples/Visibility/ExampleVisibleObjects.unity
+    guid: c6273b4f0a1ca78449385c1f9d282ef5
+  - enabled: 1
+    path: Assets/Ride/Examples/Singleplayer/Singleplayer_YumaBotMatch.unity
+    guid: c619504581d7e314bbc75167adc06c48
+  - enabled: 1
+    path: Assets/Ride/Examples/Singleplayer/Singleplayer_YumaDriving.unity
+    guid: bb8725ec051590347915b3b6a2ab643a
+  - enabled: 1
+    path: Assets/Ride/Examples/Timeline/TimelineCompilation.unity
+    guid: 03d4100a65cc36147afdef716a63eede
+  - enabled: 1
+    path: Assets/Ride/Examples/Effects/ExampleParticleEffectSystem/ExampleParticleSystem.unity
+    guid: 4f844bffbdf86ab4b9ea84626ba9578b
+  - enabled: 1
+    path: Assets/Ride/ML/BarracudaAPI/Scenes/ExampleBarracudaAPI.unity
+    guid: adc36f55dbf124a4192ae64a77c1a8f6
+  - enabled: 1
+    path: Assets/Ride/Examples/Session/ExampleSessionPlayback.unity
+    guid: 97e91312bbef3704688bde4111cd2952
+  - enabled: 1
+    path: Assets/Ride/Examples/Session/ExampleSessionPlaybackNetworked.unity
+    guid: a8a2e332f6393914e8854714157f4968
+  - enabled: 1
+    path: Assets/Ride/Examples/Session/ExampleSessionRecording.unity
+    guid: add8d2b0ac0d1af4f8fef08f58829f10
+  - enabled: 1
+    path: Assets/Ride/Examples/Session/ExampleSessionRecordingNetworked.unity
+    guid: cd7d4757fb9e1d7489023e567356d5b0
+  - enabled: 1
+    path: Assets/Ride/Examples/RideAssetLineUp/RideAssetLineUp.unity
+    guid: 9c55b7b214a97f144b47836be0bc78d1
+  - enabled: 1
+    path: Assets/Ride/Examples/TimeSimulation/ExampleTimeSimulation.unity
+    guid: 45e6b01786a3c5f47b5f4e7bb045d4d8
+  - enabled: 1
+    path: Assets/Ride/Examples/OAuth/Scenes/ExampleOAuth.unity
+    guid: 8fde90cf240e6864b96ae6ccd99b819f
+  - enabled: 1
+    path: Assets/Ride/Examples/Services/WebServices/ExampleWebServices.unity
+    guid: 0b34981309c5e9d489ba7d69814c316d
+  m_configObjects: {}

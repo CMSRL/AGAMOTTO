@@ -3,6 +3,7 @@
 *.json
 *.vsidx
 *.db-shm
+*svn-base
 *.db
 *.db-wal
 /.vs
@@ -15,4 +16,12 @@
 /AGAMOTTO/AGAMOTTO Server/EYE_OF_AGAMOTTO_RL/__pycache__
 /AGAMOTTO/AGAMOTTO Server/EYE_OF_AGAMOTTO_RL/__pycache__
 /AGAMOTTO/AGAMOTTO Server/EYE_OF_AGAMOTTO_RL/__pycache__
+/AGAMOTTO/AGAMOTTO Simulation/Assets/Ride_Dependencies
+/AGAMOTTO/AGAMOTTO Simulation/Assets/Ride_Art
+/AGAMOTTO/AGAMOTTO Simulation/Assets/Ride
+/AGAMOTTO/AGAMOTTO Simulation/Library
+/AGAMOTTO/AGAMOTTO Simulation/obj
+/AGAMOTTO/AGAMOTTO Simulation/Temp
+/AGAMOTTO/AGAMOTTO Simulation/UserSettings
+/AGAMOTTO/AGAMOTTO Simulation/Logs
 *.pyc
