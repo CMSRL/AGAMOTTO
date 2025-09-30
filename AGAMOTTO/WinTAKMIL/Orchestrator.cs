@@ -34,7 +34,7 @@ namespace AGAMOTTO.WinTAKMIL
         public Orchestrator()
         {
 
-            //_coTHelper = new CoTHelper("127.0.0.1", 65432);
+            _coTHelper = new CoTHelper("127.0.0.1", 65432);
             // sAppPath = Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location);
             //filePath = Path.Combine(sAppPath, "TAKOutput.csv");
         }
@@ -42,7 +42,7 @@ namespace AGAMOTTO.WinTAKMIL
 
         public bool SendCurrentSituation(IMapObjectItemManager mapObjectItemManager, string userInputIP)
         {
-            _coTHelper = new CoTHelper(userInputIP, 65432);
+            //_coTHelper = new CoTHelper(userInputIP, 65432);
             _mapObjectItemManager = mapObjectItemManager;
             if (mapObjectItemManager.RootItems != null)
             {
