@@ -8,6 +8,7 @@
 *.db-wal
 /.vs
 *.config
+*.xml
 /obj
 *.nupkg
 /packages
@@ -25,3 +26,4 @@
 /AGAMOTTO/AGAMOTTO Simulation/UserSettings
 /AGAMOTTO/AGAMOTTO Simulation/Logs
 *.pyc
+*.xml
