@@ -1,3 +1,5 @@
+using BllipParser.DotNet.Vanilla;
+using Pathfinding;
 using PimDeWitte.UnityMainThreadDispatcher;
 using Ride;
 using Ride.AI;
@@ -6,13 +8,15 @@ using Ride.Examples;
 using Ride.IO;
 using Ride.Movement;
 using Ride.Terrain;
+using Ride.WorldState;
 using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.IO;
+using System.Security.AccessControl;
+using System.Xml;
 using Unity.AI.Navigation;
 using UnityEngine;
-
 
 namespace AGAMOTTO
 {
@@ -42,10 +46,15 @@ namespace AGAMOTTO
         float m_terrainLoadProgress = 0;
         float m_startTime = 0;
 
+        IWorldStateSystem worldStateSystem;
+        
         protected override void Start()
         {
 
             base.Start();
+
+            worldStateSystem = Globals.api.worldStateSystem;
+            worldStateSystem.AddListener<TerrainLoadedEvent>(WorldEvent.terrainLoaded, OnTerrainLoaded);
 
             m_terrainLoader = FindObjectOfType<TerrainLoader>();
             if (m_terrainLoader == null)
@@ -92,17 +101,19 @@ namespace AGAMOTTO
             base.Update();
 
         }
+        protected virtual void OnTerrainLoaded(WorldEventMarker marker, TerrainLoadedEvent e)
+        {
+            Debug.Log("Terrain Finished Loading");
+
+
+        }
 
         bool CreateUnit(string cotType, float lat, float lng)
         {
-            //RideVector3 scenPos = Globals.api.terrainSystem.ConvertToScenePosition(lat, lng);
             //(double lat, double lon) = Globals.api.terrainSystem.ConvertToLatLng(hit.hitInfo.point, 5, true);
-            //RideLogSystem.LogFormat("Scene Point {0} == lat/lon {1}:{2}", hit.hitInfo.point, lat.ToString("f2"), lon.ToString("f2"));
+
             RideVector3 scenPos = Globals.api.terrainSystem.ConvertToScenePosition(35.3308510842807, -116.5211896686935);
             //35.3308510842807, -116.5211896686935
-            Debug.Log(scenPos);
-            //RideLogSystem.LogFormat("lat/lon {0}:{1} ==  Scene Point {2}", lat.ToString("f2"), lng.ToString("f2"), scenPos);
-
 
             RideID alphaTeamAlphaSquad = Globals.api.agentSystem.CreateFireTeam(new UnitCreationParams("Alpha Team, Alpha Squad") { rows = 2, cols = 2, position = scenPos, rotation = RideQuaternion.Euler(0, -90, 0), team = Team.Blue });
             RideID bravoTeamAlphaSquad = Globals.api.agentSystem.CreateFireTeam(new UnitCreationParams("Bravo Team, Alpha Squad") { rows = 2, cols = 2, position = scenPos, rotation = RideQuaternion.Euler(0, -90, 0), team = Team.Blue });
@@ -252,10 +263,9 @@ namespace AGAMOTTO
                 yield return null;
             }
 
-            //build test nav mesh
+            //build nav mesh
             NavMeshSurface surface = GameObject.Find("TerrainRoot").AddComponent<NavMeshSurface>();
             surface.BuildNavMesh();
-            bool success = CreateUnit("a-f-G", 0, 0);
         }
 
         IEnumerator CreateWatcher(string folder)
@@ -300,9 +310,26 @@ namespace AGAMOTTO
             {
                 return;
             }
+
             Debug.Log($"Changed: {e.FullPath}");
+
+
+
             UnityMainThreadDispatcher.Instance().Enqueue(() =>
             {
+                /*var XMLMessage = System.IO.File.ReadAllText(e.FullPath);
+                XmlDocument xml = new XmlDocument();
+                try
+                {
+                    xml.LoadXml(XMLMessage);
+                    Debug.Log(xml.GetElementById("uid").Value);
+                }
+                catch (Exception ex)
+                {
+                    Debug.Log(XMLMessage + "\r\n\r\n" + ex.Message);
+                    throw ex;
+                }*/
+
                 bool success = CreateUnit("a-f-G", 0, 0);
             });
         }
