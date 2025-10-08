@@ -7,20 +7,21 @@ from XMLHelpers import parse_cot
 HOST = '127.0.0.1'  # Localhost
 PORT = 65432        # Port to listen on
 
-def receive_xml(conn):
-    xml_data = conn.recv(1024).decode('utf-8')  # Receive up to 1024 bytes
-    with open("received.xml", "w", encoding="utf-8") as f:
-        f.write(xml_data)
-    print("XML file received and saved as 'received.xml'.")
+# UNITY_DIR = r"C:\Path\To\Unity\StreamingAssets"
+UNITY_DIR = os.path.join(os.path.dirname(__file__), "Unity_Data")  # Setting to local dir now for testing purposes
+ENT_DIR = os.path.join(UNITY_DIR, "entities")
+ROUTE_DIR = os.path.join(UNITY_DIR, "routes")
+os.makedirs(UNITY_DIR, exist_ok=True)
+os.makedirs(ENT_DIR, exist_ok=True)
+os.makedirs(ROUTE_DIR, exist_ok=True)
 
-def send_xml(conn, filepath):
-    if not os.path.exists(filepath):
-        print(f"File {filepath} not found.")
-        return
-    with open(filepath, "r", encoding="utf-8") as f:
-        xml_content = f.read()
-        conn.sendall(xml_content.encode('utf-8'))
-    print(f"XML file '{filepath}' sent.")
+def save_xml(kind, uid, xml_data):
+    """kind: 'entity' or 'route'"""
+    base = ENT_DIR if kind == "entity" else ROUTE_DIR
+    out_path = os.path.join(base, f"{uid}.xml")
+    with open(out_path, "w", encoding="utf-8") as f:
+        f.write(xml_data)
+    print(f"[UNITY] wrote {out_path}")
 
 def try_link_route_to_entity(route, entities):
     """Match a route to an entity if the first route point matches an entity's lat/lon up to 5 decimal places """
@@ -87,6 +88,9 @@ def start_server():
                         if len(verts) > 5:
                             print(f"  ... ({len(verts)-5} more)")
 
+                        route_uid = parsed.get("uid") or (r.get("name") or "route-unknown")
+                        save_xml("route", route_uid, data)
+
                         linked_uid = try_link_route_to_entity(r, entities)
                         if linked_uid:
                             print(f"  linked-to entity uid={linked_uid}")
@@ -94,6 +98,9 @@ def start_server():
 
                     if parsed:
                         print(parsed)
+
+                        entity_uid = parsed.get("uid") or "entity-unknown"
+                        save_xml("entity", entity_uid, data)
                            
                         # update entity cache if payload has location + uid
                         uid = parsed.get("uid")
