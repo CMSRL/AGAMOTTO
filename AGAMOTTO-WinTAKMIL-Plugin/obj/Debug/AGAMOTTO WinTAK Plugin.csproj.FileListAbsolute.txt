@@ -1,0 +1,225 @@
+C:\Users\matthew.corbett\AGAMOTTO\AGAMOTTO WinTAK Plugin\obj\Debug\AGAMOTTO WinTAK Plugin.csproj.AssemblyReference.cache
+C:\Users\matthew.corbett\AGAMOTTO\AGAMOTTO WinTAK Plugin\obj\Debug\AGAMOTTO WinTAK Plugin_MarkupCompile.cache
+C:\Users\matthew.corbett\AGAMOTTO\AGAMOTTO WinTAK Plugin\obj\Debug\AGAMOTTO WinTAK Plugin_MarkupCompile.lref
+C:\Users\matthew.corbett\AGAMOTTO\AGAMOTTO WinTAK Plugin\bin\Debug\AGAMOTTO WinTAK Plugin.dll
+C:\Users\matthew.corbett\AGAMOTTO\AGAMOTTO WinTAK Plugin\bin\Debug\AGAMOTTO WinTAK Plugin.pdb
+C:\Users\matthew.corbett\AGAMOTTO\AGAMOTTO WinTAK Plugin\bin\Debug\gdalconst_csharp.dll
+C:\Users\matthew.corbett\AGAMOTTO\AGAMOTTO WinTAK Plugin\bin\Debug\gdal_csharp.dll
+C:\Users\matthew.corbett\AGAMOTTO\AGAMOTTO WinTAK Plugin\bin\Debug\MapEngine.Interop.dll
+C:\Users\matthew.corbett\AGAMOTTO\AGAMOTTO WinTAK Plugin\bin\Debug\Microsoft.Practices.ServiceLocation.dll
+C:\Users\matthew.corbett\AGAMOTTO\AGAMOTTO WinTAK Plugin\bin\Debug\ogr_csharp.dll
+C:\Users\matthew.corbett\AGAMOTTO\AGAMOTTO WinTAK Plugin\bin\Debug\osr_csharp.dll
+C:\Users\matthew.corbett\AGAMOTTO\AGAMOTTO WinTAK Plugin\bin\Debug\Prism.dll
+C:\Users\matthew.corbett\AGAMOTTO\AGAMOTTO WinTAK Plugin\bin\Debug\Prism.Mef.Wpf.dll
+C:\Users\matthew.corbett\AGAMOTTO\AGAMOTTO WinTAK Plugin\bin\Debug\Prism.Wpf.dll
+C:\Users\matthew.corbett\AGAMOTTO\AGAMOTTO WinTAK Plugin\bin\Debug\Spyglass.Graphics.dll
+C:\Users\matthew.corbett\AGAMOTTO\AGAMOTTO WinTAK Plugin\bin\Debug\System.Windows.Interactivity.dll
+C:\Users\matthew.corbett\AGAMOTTO\AGAMOTTO WinTAK Plugin\bin\Debug\TAK.Engine.dll
+C:\Users\matthew.corbett\AGAMOTTO\AGAMOTTO WinTAK Plugin\bin\Debug\WinTak.Alerts.dll
+C:\Users\matthew.corbett\AGAMOTTO\AGAMOTTO WinTAK Plugin\bin\Debug\WinTak.Common.dll
+C:\Users\matthew.corbett\AGAMOTTO\AGAMOTTO WinTAK Plugin\bin\Debug\WinTak.CursorOnTarget.dll
+C:\Users\matthew.corbett\AGAMOTTO\AGAMOTTO WinTAK Plugin\bin\Debug\WinTak.CursorOnTarget.Placement.dll
+C:\Users\matthew.corbett\AGAMOTTO\AGAMOTTO WinTAK Plugin\bin\Debug\WinTak.Display.dll
+C:\Users\matthew.corbett\AGAMOTTO\AGAMOTTO WinTAK Plugin\bin\Debug\WinTak.Export.dll
+C:\Users\matthew.corbett\AGAMOTTO\AGAMOTTO WinTAK Plugin\bin\Debug\WinTak.Framework.dll
+C:\Users\matthew.corbett\AGAMOTTO\AGAMOTTO WinTAK Plugin\bin\Debug\WinTak.Framework.Preferences.dll
+C:\Users\matthew.corbett\AGAMOTTO\AGAMOTTO WinTAK Plugin\bin\Debug\WinTak.Geometry.dll
+C:\Users\matthew.corbett\AGAMOTTO\AGAMOTTO WinTAK Plugin\bin\Debug\WinTak.Graphics.dll
+C:\Users\matthew.corbett\AGAMOTTO\AGAMOTTO WinTAK Plugin\bin\Debug\WinTak.Import.dll
+C:\Users\matthew.corbett\AGAMOTTO\AGAMOTTO WinTAK Plugin\bin\Debug\WinTak.Location.dll
+C:\Users\matthew.corbett\AGAMOTTO\AGAMOTTO WinTAK Plugin\bin\Debug\WinTak.Mapping.dll
+C:\Users\matthew.corbett\AGAMOTTO\AGAMOTTO WinTAK Plugin\bin\Debug\WinTak.MissionPackages.dll
+C:\Users\matthew.corbett\AGAMOTTO\AGAMOTTO WinTAK Plugin\bin\Debug\WinTak.Net.dll
+C:\Users\matthew.corbett\AGAMOTTO\AGAMOTTO WinTAK Plugin\bin\Debug\WinTak.Overlays.dll
+C:\Users\matthew.corbett\AGAMOTTO\AGAMOTTO WinTAK Plugin\bin\Debug\WinTak.UI.Controls.dll
+C:\Users\matthew.corbett\AGAMOTTO\AGAMOTTO WinTAK Plugin\bin\Debug\WinTak.UI.dll
+C:\Users\matthew.corbett\AGAMOTTO\AGAMOTTO WinTAK Plugin\bin\Debug\Microsoft.Practices.ServiceLocation.pdb
+C:\Users\matthew.corbett\AGAMOTTO\AGAMOTTO WinTAK Plugin\bin\Debug\Microsoft.Practices.ServiceLocation.xml
+C:\Users\matthew.corbett\AGAMOTTO\AGAMOTTO WinTAK Plugin\bin\Debug\Prism.xml
+C:\Users\matthew.corbett\AGAMOTTO\AGAMOTTO WinTAK Plugin\bin\Debug\Prism.Mef.Wpf.xml
+C:\Users\matthew.corbett\AGAMOTTO\AGAMOTTO WinTAK Plugin\bin\Debug\Prism.Wpf.xml
+C:\Users\matthew.corbett\AGAMOTTO\AGAMOTTO WinTAK Plugin\obj\Debug\AGAMOTTO WinTAK Plugin.g.resources
+C:\Users\matthew.corbett\AGAMOTTO\AGAMOTTO WinTAK Plugin\obj\Debug\AGAMOTTO_WinTAK_Plugin.Properties.Resources.resources
+C:\Users\matthew.corbett\AGAMOTTO\AGAMOTTO WinTAK Plugin\obj\Debug\AGAMOTTO WinTAK Plugin.csproj.GenerateResource.cache
+C:\Users\matthew.corbett\AGAMOTTO\AGAMOTTO WinTAK Plugin\obj\Debug\AGAMOTTO WinTAK Plugin.csproj.CoreCompileInputs.cache
+C:\Users\matthew.corbett\AGAMOTTO\AGAMOTTO WinTAK Plugin\obj\Debug\AGAMOTTO.5F404BE2.Up2Date
+C:\Users\matthew.corbett\AGAMOTTO\AGAMOTTO WinTAK Plugin\obj\Debug\AGAMOTTO WinTAK Plugin.dll
+C:\Users\matthew.corbett\AGAMOTTO\AGAMOTTO WinTAK Plugin\obj\Debug\AGAMOTTO WinTAK Plugin.pdb
+C:\Users\matthew.corbett\AGAMOTTO\AGAMOTTO WinTAK Plugin\obj\Debug\TemplateView.g.cs
+C:\Users\matthew.corbett\AGAMOTTO\AGAMOTTO WinTAK Plugin\obj\Debug\TemplateView.baml
+C:\Users\matthew.corbett\AGAMOTTO WinTAK Plugin\bin\Debug\AGAMOTTO WinTAK Plugin.dll
+C:\Users\matthew.corbett\AGAMOTTO WinTAK Plugin\bin\Debug\AGAMOTTO WinTAK Plugin.pdb
+C:\Users\matthew.corbett\AGAMOTTO WinTAK Plugin\bin\Debug\gdalconst_csharp.dll
+C:\Users\matthew.corbett\AGAMOTTO WinTAK Plugin\bin\Debug\gdal_csharp.dll
+C:\Users\matthew.corbett\AGAMOTTO WinTAK Plugin\bin\Debug\MapEngine.Interop.dll
+C:\Users\matthew.corbett\AGAMOTTO WinTAK Plugin\bin\Debug\Microsoft.Practices.ServiceLocation.dll
+C:\Users\matthew.corbett\AGAMOTTO WinTAK Plugin\bin\Debug\ogr_csharp.dll
+C:\Users\matthew.corbett\AGAMOTTO WinTAK Plugin\bin\Debug\osr_csharp.dll
+C:\Users\matthew.corbett\AGAMOTTO WinTAK Plugin\bin\Debug\Prism.dll
+C:\Users\matthew.corbett\AGAMOTTO WinTAK Plugin\bin\Debug\Prism.Mef.Wpf.dll
+C:\Users\matthew.corbett\AGAMOTTO WinTAK Plugin\bin\Debug\Prism.Wpf.dll
+C:\Users\matthew.corbett\AGAMOTTO WinTAK Plugin\bin\Debug\Spyglass.Graphics.dll
+C:\Users\matthew.corbett\AGAMOTTO WinTAK Plugin\bin\Debug\System.Windows.Interactivity.dll
+C:\Users\matthew.corbett\AGAMOTTO WinTAK Plugin\bin\Debug\TAK.Engine.dll
+C:\Users\matthew.corbett\AGAMOTTO WinTAK Plugin\bin\Debug\WinTak.Alerts.dll
+C:\Users\matthew.corbett\AGAMOTTO WinTAK Plugin\bin\Debug\WinTak.Common.dll
+C:\Users\matthew.corbett\AGAMOTTO WinTAK Plugin\bin\Debug\WinTak.CursorOnTarget.dll
+C:\Users\matthew.corbett\AGAMOTTO WinTAK Plugin\bin\Debug\WinTak.CursorOnTarget.Placement.dll
+C:\Users\matthew.corbett\AGAMOTTO WinTAK Plugin\bin\Debug\WinTak.Display.dll
+C:\Users\matthew.corbett\AGAMOTTO WinTAK Plugin\bin\Debug\WinTak.Export.dll
+C:\Users\matthew.corbett\AGAMOTTO WinTAK Plugin\bin\Debug\WinTak.Framework.dll
+C:\Users\matthew.corbett\AGAMOTTO WinTAK Plugin\bin\Debug\WinTak.Framework.Preferences.dll
+C:\Users\matthew.corbett\AGAMOTTO WinTAK Plugin\bin\Debug\WinTak.Geometry.dll
+C:\Users\matthew.corbett\AGAMOTTO WinTAK Plugin\bin\Debug\WinTak.Graphics.dll
+C:\Users\matthew.corbett\AGAMOTTO WinTAK Plugin\bin\Debug\WinTak.Import.dll
+C:\Users\matthew.corbett\AGAMOTTO WinTAK Plugin\bin\Debug\WinTak.Location.dll
+C:\Users\matthew.corbett\AGAMOTTO WinTAK Plugin\bin\Debug\WinTak.Mapping.dll
+C:\Users\matthew.corbett\AGAMOTTO WinTAK Plugin\bin\Debug\WinTak.MissionPackages.dll
+C:\Users\matthew.corbett\AGAMOTTO WinTAK Plugin\bin\Debug\WinTak.Net.dll
+C:\Users\matthew.corbett\AGAMOTTO WinTAK Plugin\bin\Debug\WinTak.Overlays.dll
+C:\Users\matthew.corbett\AGAMOTTO WinTAK Plugin\bin\Debug\WinTak.UI.Controls.dll
+C:\Users\matthew.corbett\AGAMOTTO WinTAK Plugin\bin\Debug\WinTak.UI.dll
+C:\Users\matthew.corbett\AGAMOTTO WinTAK Plugin\bin\Debug\Microsoft.Practices.ServiceLocation.pdb
+C:\Users\matthew.corbett\AGAMOTTO WinTAK Plugin\bin\Debug\Microsoft.Practices.ServiceLocation.xml
+C:\Users\matthew.corbett\AGAMOTTO WinTAK Plugin\bin\Debug\Prism.xml
+C:\Users\matthew.corbett\AGAMOTTO WinTAK Plugin\bin\Debug\Prism.Mef.Wpf.xml
+C:\Users\matthew.corbett\AGAMOTTO WinTAK Plugin\bin\Debug\Prism.Wpf.xml
+C:\Users\matthew.corbett\AGAMOTTO WinTAK Plugin\obj\Debug\AGAMOTTO WinTAK Plugin.csproj.AssemblyReference.cache
+C:\Users\matthew.corbett\AGAMOTTO WinTAK Plugin\obj\Debug\TemplateView.g.cs
+C:\Users\matthew.corbett\AGAMOTTO WinTAK Plugin\obj\Debug\AGAMOTTO WinTAK Plugin_MarkupCompile.cache
+C:\Users\matthew.corbett\AGAMOTTO WinTAK Plugin\obj\Debug\AGAMOTTO WinTAK Plugin_MarkupCompile.lref
+C:\Users\matthew.corbett\AGAMOTTO WinTAK Plugin\obj\Debug\TemplateView.baml
+C:\Users\matthew.corbett\AGAMOTTO WinTAK Plugin\obj\Debug\AGAMOTTO WinTAK Plugin.g.resources
+C:\Users\matthew.corbett\AGAMOTTO WinTAK Plugin\obj\Debug\AGAMOTTO_WinTAK_Plugin.Properties.Resources.resources
+C:\Users\matthew.corbett\AGAMOTTO WinTAK Plugin\obj\Debug\AGAMOTTO WinTAK Plugin.csproj.GenerateResource.cache
+C:\Users\matthew.corbett\AGAMOTTO WinTAK Plugin\obj\Debug\AGAMOTTO WinTAK Plugin.csproj.CoreCompileInputs.cache
+C:\Users\matthew.corbett\AGAMOTTO WinTAK Plugin\obj\Debug\AGAMOTTO.5F404BE2.Up2Date
+C:\Users\matthew.corbett\AGAMOTTO WinTAK Plugin\obj\Debug\AGAMOTTO WinTAK Plugin.dll
+C:\Users\matthew.corbett\AGAMOTTO WinTAK Plugin\obj\Debug\AGAMOTTO WinTAK Plugin.pdb
+C:\Users\matthew.corbett\AGAMOTTO-WinTAKMIL-Plugin\bin\Debug\AGAMOTTO WinTAK Plugin.dll
+C:\Users\matthew.corbett\AGAMOTTO-WinTAKMIL-Plugin\bin\Debug\AGAMOTTO WinTAK Plugin.pdb
+C:\Users\matthew.corbett\AGAMOTTO-WinTAKMIL-Plugin\bin\Debug\gdalconst_csharp.dll
+C:\Users\matthew.corbett\AGAMOTTO-WinTAKMIL-Plugin\bin\Debug\gdal_csharp.dll
+C:\Users\matthew.corbett\AGAMOTTO-WinTAKMIL-Plugin\bin\Debug\MapEngine.Interop.dll
+C:\Users\matthew.corbett\AGAMOTTO-WinTAKMIL-Plugin\bin\Debug\Microsoft.Practices.ServiceLocation.dll
+C:\Users\matthew.corbett\AGAMOTTO-WinTAKMIL-Plugin\bin\Debug\ogr_csharp.dll
+C:\Users\matthew.corbett\AGAMOTTO-WinTAKMIL-Plugin\bin\Debug\osr_csharp.dll
+C:\Users\matthew.corbett\AGAMOTTO-WinTAKMIL-Plugin\bin\Debug\Prism.dll
+C:\Users\matthew.corbett\AGAMOTTO-WinTAKMIL-Plugin\bin\Debug\Prism.Mef.Wpf.dll
+C:\Users\matthew.corbett\AGAMOTTO-WinTAKMIL-Plugin\bin\Debug\Prism.Wpf.dll
+C:\Users\matthew.corbett\AGAMOTTO-WinTAKMIL-Plugin\bin\Debug\Spyglass.Graphics.dll
+C:\Users\matthew.corbett\AGAMOTTO-WinTAKMIL-Plugin\bin\Debug\System.Windows.Interactivity.dll
+C:\Users\matthew.corbett\AGAMOTTO-WinTAKMIL-Plugin\bin\Debug\TAK.Engine.dll
+C:\Users\matthew.corbett\AGAMOTTO-WinTAKMIL-Plugin\bin\Debug\WinTak.Alerts.dll
+C:\Users\matthew.corbett\AGAMOTTO-WinTAKMIL-Plugin\bin\Debug\WinTak.Common.dll
+C:\Users\matthew.corbett\AGAMOTTO-WinTAKMIL-Plugin\bin\Debug\WinTak.CursorOnTarget.dll
+C:\Users\matthew.corbett\AGAMOTTO-WinTAKMIL-Plugin\bin\Debug\WinTak.CursorOnTarget.Placement.dll
+C:\Users\matthew.corbett\AGAMOTTO-WinTAKMIL-Plugin\bin\Debug\WinTak.Display.dll
+C:\Users\matthew.corbett\AGAMOTTO-WinTAKMIL-Plugin\bin\Debug\WinTak.Export.dll
+C:\Users\matthew.corbett\AGAMOTTO-WinTAKMIL-Plugin\bin\Debug\WinTak.Framework.dll
+C:\Users\matthew.corbett\AGAMOTTO-WinTAKMIL-Plugin\bin\Debug\WinTak.Framework.Preferences.dll
+C:\Users\matthew.corbett\AGAMOTTO-WinTAKMIL-Plugin\bin\Debug\WinTak.Geometry.dll
+C:\Users\matthew.corbett\AGAMOTTO-WinTAKMIL-Plugin\bin\Debug\WinTak.Graphics.dll
+C:\Users\matthew.corbett\AGAMOTTO-WinTAKMIL-Plugin\bin\Debug\WinTak.Import.dll
+C:\Users\matthew.corbett\AGAMOTTO-WinTAKMIL-Plugin\bin\Debug\WinTak.Location.dll
+C:\Users\matthew.corbett\AGAMOTTO-WinTAKMIL-Plugin\bin\Debug\WinTak.Mapping.dll
+C:\Users\matthew.corbett\AGAMOTTO-WinTAKMIL-Plugin\bin\Debug\WinTak.MissionPackages.dll
+C:\Users\matthew.corbett\AGAMOTTO-WinTAKMIL-Plugin\bin\Debug\WinTak.Net.dll
+C:\Users\matthew.corbett\AGAMOTTO-WinTAKMIL-Plugin\bin\Debug\WinTak.Overlays.dll
+C:\Users\matthew.corbett\AGAMOTTO-WinTAKMIL-Plugin\bin\Debug\WinTak.UI.Controls.dll
+C:\Users\matthew.corbett\AGAMOTTO-WinTAKMIL-Plugin\bin\Debug\WinTak.UI.dll
+C:\Users\matthew.corbett\AGAMOTTO-WinTAKMIL-Plugin\bin\Debug\Microsoft.Practices.ServiceLocation.pdb
+C:\Users\matthew.corbett\AGAMOTTO-WinTAKMIL-Plugin\bin\Debug\Microsoft.Practices.ServiceLocation.xml
+C:\Users\matthew.corbett\AGAMOTTO-WinTAKMIL-Plugin\bin\Debug\Prism.xml
+C:\Users\matthew.corbett\AGAMOTTO-WinTAKMIL-Plugin\bin\Debug\Prism.Mef.Wpf.xml
+C:\Users\matthew.corbett\AGAMOTTO-WinTAKMIL-Plugin\bin\Debug\Prism.Wpf.xml
+C:\Users\matthew.corbett\AGAMOTTO-WinTAKMIL-Plugin\obj\Debug\AGAMOTTO WinTAK Plugin.csproj.AssemblyReference.cache
+C:\Users\matthew.corbett\AGAMOTTO-WinTAKMIL-Plugin\obj\Debug\TemplateView.g.cs
+C:\Users\matthew.corbett\AGAMOTTO-WinTAKMIL-Plugin\obj\Debug\AGAMOTTO WinTAK Plugin_MarkupCompile.cache
+C:\Users\matthew.corbett\AGAMOTTO-WinTAKMIL-Plugin\obj\Debug\AGAMOTTO WinTAK Plugin_MarkupCompile.lref
+C:\Users\matthew.corbett\AGAMOTTO-WinTAKMIL-Plugin\obj\Debug\TemplateView.baml
+C:\Users\matthew.corbett\AGAMOTTO-WinTAKMIL-Plugin\obj\Debug\AGAMOTTO WinTAK Plugin.g.resources
+C:\Users\matthew.corbett\AGAMOTTO-WinTAKMIL-Plugin\obj\Debug\AGAMOTTO_WinTAK_Plugin.Properties.Resources.resources
+C:\Users\matthew.corbett\AGAMOTTO-WinTAKMIL-Plugin\obj\Debug\AGAMOTTO WinTAK Plugin.csproj.GenerateResource.cache
+C:\Users\matthew.corbett\AGAMOTTO-WinTAKMIL-Plugin\obj\Debug\AGAMOTTO WinTAK Plugin.csproj.CoreCompileInputs.cache
+C:\Users\matthew.corbett\AGAMOTTO-WinTAKMIL-Plugin\obj\Debug\AGAMOTTO.5F404BE2.Up2Date
+C:\Users\matthew.corbett\AGAMOTTO-WinTAKMIL-Plugin\obj\Debug\AGAMOTTO WinTAK Plugin.dll
+C:\Users\matthew.corbett\AGAMOTTO-WinTAKMIL-Plugin\obj\Debug\AGAMOTTO WinTAK Plugin.pdb
+C:\Users\matthew.corbett\AGAMOTTO-WinTAKMIL-Plugin\bin\Debug\AGAMOTTO WinTAK Plugin.dll.config
+C:\Users\matthew.corbett\AGAMOTTO-WinTAKMIL-Plugin\bin\Debug\Microsoft.Bcl.AsyncInterfaces.dll
+C:\Users\matthew.corbett\AGAMOTTO-WinTAKMIL-Plugin\bin\Debug\Microsoft.Bcl.HashCode.dll
+C:\Users\matthew.corbett\AGAMOTTO-WinTAKMIL-Plugin\bin\Debug\System.Buffers.dll
+C:\Users\matthew.corbett\AGAMOTTO-WinTAKMIL-Plugin\bin\Debug\System.Memory.dll
+C:\Users\matthew.corbett\AGAMOTTO-WinTAKMIL-Plugin\bin\Debug\System.Numerics.Vectors.dll
+C:\Users\matthew.corbett\AGAMOTTO-WinTAKMIL-Plugin\bin\Debug\System.Runtime.CompilerServices.Unsafe.dll
+C:\Users\matthew.corbett\AGAMOTTO-WinTAKMIL-Plugin\bin\Debug\System.Threading.Tasks.Extensions.dll
+C:\Users\matthew.corbett\AGAMOTTO-WinTAKMIL-Plugin\bin\Debug\Microsoft.Bcl.AsyncInterfaces.xml
+C:\Users\matthew.corbett\AGAMOTTO-WinTAKMIL-Plugin\bin\Debug\Microsoft.Bcl.HashCode.xml
+C:\Users\matthew.corbett\AGAMOTTO-WinTAKMIL-Plugin\bin\Debug\System.Buffers.xml
+C:\Users\matthew.corbett\AGAMOTTO-WinTAKMIL-Plugin\bin\Debug\System.Memory.xml
+C:\Users\matthew.corbett\AGAMOTTO-WinTAKMIL-Plugin\bin\Debug\System.Numerics.Vectors.xml
+C:\Users\matthew.corbett\AGAMOTTO-WinTAKMIL-Plugin\bin\Debug\System.Runtime.CompilerServices.Unsafe.xml
+C:\Users\matthew.corbett\AGAMOTTO-WinTAKMIL-Plugin\bin\Debug\System.Threading.Tasks.Extensions.xml
+C:\Users\emily.nack\OneDrive - West Point\Documents\GitHub\AGAMOTTO-WinTAKMIL-Plugin\bin\Debug\AGAMOTTO WinTAK Plugin.dll.config
+C:\Users\emily.nack\OneDrive - West Point\Documents\GitHub\AGAMOTTO-WinTAKMIL-Plugin\bin\Debug\AGAMOTTO WinTAK Plugin.dll
+C:\Users\emily.nack\OneDrive - West Point\Documents\GitHub\AGAMOTTO-WinTAKMIL-Plugin\bin\Debug\AGAMOTTO WinTAK Plugin.pdb
+C:\Users\emily.nack\OneDrive - West Point\Documents\GitHub\AGAMOTTO-WinTAKMIL-Plugin\bin\Debug\gdalconst_csharp.dll
+C:\Users\emily.nack\OneDrive - West Point\Documents\GitHub\AGAMOTTO-WinTAKMIL-Plugin\bin\Debug\gdal_csharp.dll
+C:\Users\emily.nack\OneDrive - West Point\Documents\GitHub\AGAMOTTO-WinTAKMIL-Plugin\bin\Debug\MapEngine.Interop.dll
+C:\Users\emily.nack\OneDrive - West Point\Documents\GitHub\AGAMOTTO-WinTAKMIL-Plugin\bin\Debug\Microsoft.Bcl.AsyncInterfaces.dll
+C:\Users\emily.nack\OneDrive - West Point\Documents\GitHub\AGAMOTTO-WinTAKMIL-Plugin\bin\Debug\Microsoft.Bcl.HashCode.dll
+C:\Users\emily.nack\OneDrive - West Point\Documents\GitHub\AGAMOTTO-WinTAKMIL-Plugin\bin\Debug\Microsoft.Practices.ServiceLocation.dll
+C:\Users\emily.nack\OneDrive - West Point\Documents\GitHub\AGAMOTTO-WinTAKMIL-Plugin\bin\Debug\ogr_csharp.dll
+C:\Users\emily.nack\OneDrive - West Point\Documents\GitHub\AGAMOTTO-WinTAKMIL-Plugin\bin\Debug\osr_csharp.dll
+C:\Users\emily.nack\OneDrive - West Point\Documents\GitHub\AGAMOTTO-WinTAKMIL-Plugin\bin\Debug\Prism.dll
+C:\Users\emily.nack\OneDrive - West Point\Documents\GitHub\AGAMOTTO-WinTAKMIL-Plugin\bin\Debug\Prism.Mef.Wpf.dll
+C:\Users\emily.nack\OneDrive - West Point\Documents\GitHub\AGAMOTTO-WinTAKMIL-Plugin\bin\Debug\Prism.Wpf.dll
+C:\Users\emily.nack\OneDrive - West Point\Documents\GitHub\AGAMOTTO-WinTAKMIL-Plugin\bin\Debug\Spyglass.Graphics.dll
+C:\Users\emily.nack\OneDrive - West Point\Documents\GitHub\AGAMOTTO-WinTAKMIL-Plugin\bin\Debug\System.Buffers.dll
+C:\Users\emily.nack\OneDrive - West Point\Documents\GitHub\AGAMOTTO-WinTAKMIL-Plugin\bin\Debug\System.Memory.dll
+C:\Users\emily.nack\OneDrive - West Point\Documents\GitHub\AGAMOTTO-WinTAKMIL-Plugin\bin\Debug\System.Numerics.Vectors.dll
+C:\Users\emily.nack\OneDrive - West Point\Documents\GitHub\AGAMOTTO-WinTAKMIL-Plugin\bin\Debug\System.Runtime.CompilerServices.Unsafe.dll
+C:\Users\emily.nack\OneDrive - West Point\Documents\GitHub\AGAMOTTO-WinTAKMIL-Plugin\bin\Debug\System.Threading.Tasks.Extensions.dll
+C:\Users\emily.nack\OneDrive - West Point\Documents\GitHub\AGAMOTTO-WinTAKMIL-Plugin\bin\Debug\System.Windows.Interactivity.dll
+C:\Users\emily.nack\OneDrive - West Point\Documents\GitHub\AGAMOTTO-WinTAKMIL-Plugin\bin\Debug\WinTak.Alerts.dll
+C:\Users\emily.nack\OneDrive - West Point\Documents\GitHub\AGAMOTTO-WinTAKMIL-Plugin\bin\Debug\WinTak.Common.dll
+C:\Users\emily.nack\OneDrive - West Point\Documents\GitHub\AGAMOTTO-WinTAKMIL-Plugin\bin\Debug\WinTak.CursorOnTarget.dll
+C:\Users\emily.nack\OneDrive - West Point\Documents\GitHub\AGAMOTTO-WinTAKMIL-Plugin\bin\Debug\WinTak.CursorOnTarget.Placement.dll
+C:\Users\emily.nack\OneDrive - West Point\Documents\GitHub\AGAMOTTO-WinTAKMIL-Plugin\bin\Debug\WinTak.Display.dll
+C:\Users\emily.nack\OneDrive - West Point\Documents\GitHub\AGAMOTTO-WinTAKMIL-Plugin\bin\Debug\WinTak.Export.dll
+C:\Users\emily.nack\OneDrive - West Point\Documents\GitHub\AGAMOTTO-WinTAKMIL-Plugin\bin\Debug\WinTak.Framework.dll
+C:\Users\emily.nack\OneDrive - West Point\Documents\GitHub\AGAMOTTO-WinTAKMIL-Plugin\bin\Debug\WinTak.Framework.Preferences.dll
+C:\Users\emily.nack\OneDrive - West Point\Documents\GitHub\AGAMOTTO-WinTAKMIL-Plugin\bin\Debug\WinTak.Geometry.dll
+C:\Users\emily.nack\OneDrive - West Point\Documents\GitHub\AGAMOTTO-WinTAKMIL-Plugin\bin\Debug\WinTak.Graphics.dll
+C:\Users\emily.nack\OneDrive - West Point\Documents\GitHub\AGAMOTTO-WinTAKMIL-Plugin\bin\Debug\WinTak.Import.dll
+C:\Users\emily.nack\OneDrive - West Point\Documents\GitHub\AGAMOTTO-WinTAKMIL-Plugin\bin\Debug\WinTak.Location.dll
+C:\Users\emily.nack\OneDrive - West Point\Documents\GitHub\AGAMOTTO-WinTAKMIL-Plugin\bin\Debug\WinTak.Mapping.dll
+C:\Users\emily.nack\OneDrive - West Point\Documents\GitHub\AGAMOTTO-WinTAKMIL-Plugin\bin\Debug\WinTak.MissionPackages.dll
+C:\Users\emily.nack\OneDrive - West Point\Documents\GitHub\AGAMOTTO-WinTAKMIL-Plugin\bin\Debug\WinTak.Net.dll
+C:\Users\emily.nack\OneDrive - West Point\Documents\GitHub\AGAMOTTO-WinTAKMIL-Plugin\bin\Debug\WinTak.Overlays.dll
+C:\Users\emily.nack\OneDrive - West Point\Documents\GitHub\AGAMOTTO-WinTAKMIL-Plugin\bin\Debug\WinTak.UI.Controls.dll
+C:\Users\emily.nack\OneDrive - West Point\Documents\GitHub\AGAMOTTO-WinTAKMIL-Plugin\bin\Debug\WinTak.UI.dll
+C:\Users\emily.nack\OneDrive - West Point\Documents\GitHub\AGAMOTTO-WinTAKMIL-Plugin\bin\Debug\Microsoft.Bcl.AsyncInterfaces.xml
+C:\Users\emily.nack\OneDrive - West Point\Documents\GitHub\AGAMOTTO-WinTAKMIL-Plugin\bin\Debug\Microsoft.Bcl.HashCode.xml
+C:\Users\emily.nack\OneDrive - West Point\Documents\GitHub\AGAMOTTO-WinTAKMIL-Plugin\bin\Debug\Microsoft.Practices.ServiceLocation.pdb
+C:\Users\emily.nack\OneDrive - West Point\Documents\GitHub\AGAMOTTO-WinTAKMIL-Plugin\bin\Debug\Microsoft.Practices.ServiceLocation.xml
+C:\Users\emily.nack\OneDrive - West Point\Documents\GitHub\AGAMOTTO-WinTAKMIL-Plugin\bin\Debug\Prism.xml
+C:\Users\emily.nack\OneDrive - West Point\Documents\GitHub\AGAMOTTO-WinTAKMIL-Plugin\bin\Debug\Prism.Mef.Wpf.xml
+C:\Users\emily.nack\OneDrive - West Point\Documents\GitHub\AGAMOTTO-WinTAKMIL-Plugin\bin\Debug\Prism.Wpf.xml
+C:\Users\emily.nack\OneDrive - West Point\Documents\GitHub\AGAMOTTO-WinTAKMIL-Plugin\bin\Debug\System.Buffers.xml
+C:\Users\emily.nack\OneDrive - West Point\Documents\GitHub\AGAMOTTO-WinTAKMIL-Plugin\bin\Debug\System.Memory.xml
+C:\Users\emily.nack\OneDrive - West Point\Documents\GitHub\AGAMOTTO-WinTAKMIL-Plugin\bin\Debug\System.Numerics.Vectors.xml
+C:\Users\emily.nack\OneDrive - West Point\Documents\GitHub\AGAMOTTO-WinTAKMIL-Plugin\bin\Debug\System.Runtime.CompilerServices.Unsafe.xml
+C:\Users\emily.nack\OneDrive - West Point\Documents\GitHub\AGAMOTTO-WinTAKMIL-Plugin\bin\Debug\System.Threading.Tasks.Extensions.xml
+C:\Users\emily.nack\OneDrive - West Point\Documents\GitHub\AGAMOTTO-WinTAKMIL-Plugin\obj\Debug\AGAMOTTO WinTAK Plugin.csproj.AssemblyReference.cache
+C:\Users\emily.nack\OneDrive - West Point\Documents\GitHub\AGAMOTTO-WinTAKMIL-Plugin\obj\Debug\TemplateView.g.cs
+C:\Users\emily.nack\OneDrive - West Point\Documents\GitHub\AGAMOTTO-WinTAKMIL-Plugin\obj\Debug\AGAMOTTO WinTAK Plugin_MarkupCompile.cache
+C:\Users\emily.nack\OneDrive - West Point\Documents\GitHub\AGAMOTTO-WinTAKMIL-Plugin\obj\Debug\AGAMOTTO WinTAK Plugin_MarkupCompile.lref
+C:\Users\emily.nack\OneDrive - West Point\Documents\GitHub\AGAMOTTO-WinTAKMIL-Plugin\obj\Debug\TemplateView.baml
+C:\Users\emily.nack\OneDrive - West Point\Documents\GitHub\AGAMOTTO-WinTAKMIL-Plugin\obj\Debug\AGAMOTTO WinTAK Plugin.g.resources
+C:\Users\emily.nack\OneDrive - West Point\Documents\GitHub\AGAMOTTO-WinTAKMIL-Plugin\obj\Debug\AGAMOTTO_WinTAK_Plugin.Properties.Resources.resources
+C:\Users\emily.nack\OneDrive - West Point\Documents\GitHub\AGAMOTTO-WinTAKMIL-Plugin\obj\Debug\AGAMOTTO WinTAK Plugin.csproj.GenerateResource.cache
+C:\Users\emily.nack\OneDrive - West Point\Documents\GitHub\AGAMOTTO-WinTAKMIL-Plugin\obj\Debug\AGAMOTTO WinTAK Plugin.csproj.CoreCompileInputs.cache
+C:\Users\emily.nack\OneDrive - West Point\Documents\GitHub\AGAMOTTO-WinTAKMIL-Plugin\obj\Debug\AGAMOTTO.5F404BE2.Up2Date
+C:\Users\emily.nack\OneDrive - West Point\Documents\GitHub\AGAMOTTO-WinTAKMIL-Plugin\obj\Debug\AGAMOTTO WinTAK Plugin.dll
+C:\Users\emily.nack\OneDrive - West Point\Documents\GitHub\AGAMOTTO-WinTAKMIL-Plugin\obj\Debug\AGAMOTTO WinTAK Plugin.pdb

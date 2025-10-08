@@ -1,0 +1,49 @@
+C:\Users\matthew.corbett\AGAMOTTO\AGAMOTTO WinTAK Plugin\bin\Release\AGAMOTTO WinTAK Plugin.dll
+C:\Users\matthew.corbett\AGAMOTTO\AGAMOTTO WinTAK Plugin\bin\Release\AGAMOTTO WinTAK Plugin.pdb
+C:\Users\matthew.corbett\AGAMOTTO\AGAMOTTO WinTAK Plugin\bin\Release\gdalconst_csharp.dll
+C:\Users\matthew.corbett\AGAMOTTO\AGAMOTTO WinTAK Plugin\bin\Release\gdal_csharp.dll
+C:\Users\matthew.corbett\AGAMOTTO\AGAMOTTO WinTAK Plugin\bin\Release\MapEngine.Interop.dll
+C:\Users\matthew.corbett\AGAMOTTO\AGAMOTTO WinTAK Plugin\bin\Release\Microsoft.Practices.ServiceLocation.dll
+C:\Users\matthew.corbett\AGAMOTTO\AGAMOTTO WinTAK Plugin\bin\Release\ogr_csharp.dll
+C:\Users\matthew.corbett\AGAMOTTO\AGAMOTTO WinTAK Plugin\bin\Release\osr_csharp.dll
+C:\Users\matthew.corbett\AGAMOTTO\AGAMOTTO WinTAK Plugin\bin\Release\Prism.dll
+C:\Users\matthew.corbett\AGAMOTTO\AGAMOTTO WinTAK Plugin\bin\Release\Prism.Mef.Wpf.dll
+C:\Users\matthew.corbett\AGAMOTTO\AGAMOTTO WinTAK Plugin\bin\Release\Prism.Wpf.dll
+C:\Users\matthew.corbett\AGAMOTTO\AGAMOTTO WinTAK Plugin\bin\Release\Spyglass.Graphics.dll
+C:\Users\matthew.corbett\AGAMOTTO\AGAMOTTO WinTAK Plugin\bin\Release\System.Windows.Interactivity.dll
+C:\Users\matthew.corbett\AGAMOTTO\AGAMOTTO WinTAK Plugin\bin\Release\TAK.Engine.dll
+C:\Users\matthew.corbett\AGAMOTTO\AGAMOTTO WinTAK Plugin\bin\Release\WinTak.Alerts.dll
+C:\Users\matthew.corbett\AGAMOTTO\AGAMOTTO WinTAK Plugin\bin\Release\WinTak.Common.dll
+C:\Users\matthew.corbett\AGAMOTTO\AGAMOTTO WinTAK Plugin\bin\Release\WinTak.CursorOnTarget.dll
+C:\Users\matthew.corbett\AGAMOTTO\AGAMOTTO WinTAK Plugin\bin\Release\WinTak.CursorOnTarget.Placement.dll
+C:\Users\matthew.corbett\AGAMOTTO\AGAMOTTO WinTAK Plugin\bin\Release\WinTak.Display.dll
+C:\Users\matthew.corbett\AGAMOTTO\AGAMOTTO WinTAK Plugin\bin\Release\WinTak.Export.dll
+C:\Users\matthew.corbett\AGAMOTTO\AGAMOTTO WinTAK Plugin\bin\Release\WinTak.Framework.dll
+C:\Users\matthew.corbett\AGAMOTTO\AGAMOTTO WinTAK Plugin\bin\Release\WinTak.Framework.Preferences.dll
+C:\Users\matthew.corbett\AGAMOTTO\AGAMOTTO WinTAK Plugin\bin\Release\WinTak.Geometry.dll
+C:\Users\matthew.corbett\AGAMOTTO\AGAMOTTO WinTAK Plugin\bin\Release\WinTak.Graphics.dll
+C:\Users\matthew.corbett\AGAMOTTO\AGAMOTTO WinTAK Plugin\bin\Release\WinTak.Import.dll
+C:\Users\matthew.corbett\AGAMOTTO\AGAMOTTO WinTAK Plugin\bin\Release\WinTak.Location.dll
+C:\Users\matthew.corbett\AGAMOTTO\AGAMOTTO WinTAK Plugin\bin\Release\WinTak.Mapping.dll
+C:\Users\matthew.corbett\AGAMOTTO\AGAMOTTO WinTAK Plugin\bin\Release\WinTak.MissionPackages.dll
+C:\Users\matthew.corbett\AGAMOTTO\AGAMOTTO WinTAK Plugin\bin\Release\WinTak.Net.dll
+C:\Users\matthew.corbett\AGAMOTTO\AGAMOTTO WinTAK Plugin\bin\Release\WinTak.Overlays.dll
+C:\Users\matthew.corbett\AGAMOTTO\AGAMOTTO WinTAK Plugin\bin\Release\WinTak.UI.Controls.dll
+C:\Users\matthew.corbett\AGAMOTTO\AGAMOTTO WinTAK Plugin\bin\Release\WinTak.UI.dll
+C:\Users\matthew.corbett\AGAMOTTO\AGAMOTTO WinTAK Plugin\bin\Release\Microsoft.Practices.ServiceLocation.pdb
+C:\Users\matthew.corbett\AGAMOTTO\AGAMOTTO WinTAK Plugin\bin\Release\Microsoft.Practices.ServiceLocation.xml
+C:\Users\matthew.corbett\AGAMOTTO\AGAMOTTO WinTAK Plugin\bin\Release\Prism.xml
+C:\Users\matthew.corbett\AGAMOTTO\AGAMOTTO WinTAK Plugin\bin\Release\Prism.Mef.Wpf.xml
+C:\Users\matthew.corbett\AGAMOTTO\AGAMOTTO WinTAK Plugin\bin\Release\Prism.Wpf.xml
+C:\Users\matthew.corbett\AGAMOTTO\AGAMOTTO WinTAK Plugin\obj\Release\AGAMOTTO WinTAK Plugin.csproj.AssemblyReference.cache
+C:\Users\matthew.corbett\AGAMOTTO\AGAMOTTO WinTAK Plugin\obj\Release\TemplateView.g.cs
+C:\Users\matthew.corbett\AGAMOTTO\AGAMOTTO WinTAK Plugin\obj\Release\AGAMOTTO WinTAK Plugin_MarkupCompile.cache
+C:\Users\matthew.corbett\AGAMOTTO\AGAMOTTO WinTAK Plugin\obj\Release\AGAMOTTO WinTAK Plugin_MarkupCompile.lref
+C:\Users\matthew.corbett\AGAMOTTO\AGAMOTTO WinTAK Plugin\obj\Release\TemplateView.baml
+C:\Users\matthew.corbett\AGAMOTTO\AGAMOTTO WinTAK Plugin\obj\Release\AGAMOTTO WinTAK Plugin.g.resources
+C:\Users\matthew.corbett\AGAMOTTO\AGAMOTTO WinTAK Plugin\obj\Release\AGAMOTTO_WinTAK_Plugin.Properties.Resources.resources
+C:\Users\matthew.corbett\AGAMOTTO\AGAMOTTO WinTAK Plugin\obj\Release\AGAMOTTO WinTAK Plugin.csproj.GenerateResource.cache
+C:\Users\matthew.corbett\AGAMOTTO\AGAMOTTO WinTAK Plugin\obj\Release\AGAMOTTO WinTAK Plugin.csproj.CoreCompileInputs.cache
+C:\Users\matthew.corbett\AGAMOTTO\AGAMOTTO WinTAK Plugin\obj\Release\AGAMOTTO.5F404BE2.Up2Date
+C:\Users\matthew.corbett\AGAMOTTO\AGAMOTTO WinTAK Plugin\obj\Release\AGAMOTTO WinTAK Plugin.dll
+C:\Users\matthew.corbett\AGAMOTTO\AGAMOTTO WinTAK Plugin\obj\Release\AGAMOTTO WinTAK Plugin.pdb
