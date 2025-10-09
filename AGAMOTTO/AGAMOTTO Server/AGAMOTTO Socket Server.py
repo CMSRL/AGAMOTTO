@@ -1,14 +1,14 @@
 import socket
 import os
 import sys
-
+from dict2xml import dict2xml
 from XMLHelpers import parse_cot
 
 HOST = '127.0.0.1'  # Localhost
 PORT = 65432        # Port to listen on
 
-# UNITY_DIR = r"C:\Path\To\Unity\StreamingAssets"
-UNITY_DIR = os.path.join(os.path.dirname(__file__), "Unity_Data")  # Setting to local dir now for testing purposes
+UNITY_DIR = r"C:\Users\matthew.corbett\AGAMOTTO\AGAMOTTO\AGAMOTTO Simulation\Assets\StreamingAssets"
+#UNITY_DIR = os.path.join(os.path.dirname(__file__), "Unity_Data")  # Setting to local dir now for testing purposes
 ENT_DIR = os.path.join(UNITY_DIR, "entities")
 ROUTE_DIR = os.path.join(UNITY_DIR, "routes")
 os.makedirs(UNITY_DIR, exist_ok=True)
@@ -89,7 +89,8 @@ def start_server():
                             print(f"  ... ({len(verts)-5} more)")
 
                         route_uid = parsed.get("uid") or (r.get("name") or "route-unknown")
-                        save_xml("route", route_uid, data)
+                        xmlData = dict2xml(parsed, wrap="root", indent="  ")
+                        save_xml("route", route_uid, xmlData)
 
                         linked_uid = try_link_route_to_entity(r, entities)
                         if linked_uid:
@@ -100,7 +101,9 @@ def start_server():
                         print(parsed)
 
                         entity_uid = parsed.get("uid") or "entity-unknown"
-                        save_xml("entity", entity_uid, data)
+                        xmlData = dict2xml(parsed, wrap="root", indent="  ")
+                        print(xmlData)
+                        save_xml("entity", entity_uid, xmlData)
                            
                         # update entity cache if payload has location + uid
                         uid = parsed.get("uid")

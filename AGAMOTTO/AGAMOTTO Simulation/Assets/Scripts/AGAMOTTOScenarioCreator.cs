@@ -1,4 +1,5 @@
 using BllipParser.DotNet.Vanilla;
+using Fusion;
 using Pathfinding;
 using PimDeWitte.UnityMainThreadDispatcher;
 using Ride;
@@ -108,11 +109,10 @@ namespace AGAMOTTO
 
         }
 
-        bool CreateUnit(string cotType, float lat, float lng)
+        bool CreateUnit(string cotType, string callsign, double lat, double lng)
         {
-            //(double lat, double lon) = Globals.api.terrainSystem.ConvertToLatLng(hit.hitInfo.point, 5, true);
 
-            RideVector3 scenPos = Globals.api.terrainSystem.ConvertToScenePosition(35.3308510842807, -116.5211896686935);
+            RideVector3 scenPos = Globals.api.terrainSystem.ConvertToScenePosition(lat, lng);
             //35.3308510842807, -116.5211896686935
 
             RideID alphaTeamAlphaSquad = Globals.api.agentSystem.CreateFireTeam(new UnitCreationParams("Alpha Team, Alpha Squad") { rows = 2, cols = 2, position = scenPos, rotation = RideQuaternion.Euler(0, -90, 0), team = Team.Blue });
@@ -312,38 +312,131 @@ namespace AGAMOTTO
             }
 
             Debug.Log($"Changed: {e.FullPath}");
-
-
-
-            UnityMainThreadDispatcher.Instance().Enqueue(() =>
+            XmlDocument doc = new XmlDocument();
+            try
             {
-                /*var XMLMessage = System.IO.File.ReadAllText(e.FullPath);
-                XmlDocument xml = new XmlDocument();
-                try
-                {
-                    xml.LoadXml(XMLMessage);
-                    Debug.Log(xml.GetElementById("uid").Value);
-                }
-                catch (Exception ex)
-                {
-                    Debug.Log(XMLMessage + "\r\n\r\n" + ex.Message);
-                    throw ex;
-                }*/
+                doc.Load(e.FullPath);
+                XmlNode root = doc.SelectSingleNode("/root");
 
-                bool success = CreateUnit("a-f-G", 0, 0);
-            });
+                if (root != null)
+                {
+                    string callsign = root.SelectSingleNode("callsign")?.InnerText;
+                    string ce = root.SelectSingleNode("ce")?.InnerText;
+                    string hae = root.SelectSingleNode("hae")?.InnerText;
+                    string how = root.SelectSingleNode("how")?.InnerText;
+                    string lat = root.SelectSingleNode("lat")?.InnerText;
+                    string le = root.SelectSingleNode("le")?.InnerText;
+                    string lon = root.SelectSingleNode("lon")?.InnerText;
+                    string stale = root.SelectSingleNode("stale")?.InnerText;
+                    string start = root.SelectSingleNode("start")?.InnerText;
+                    string time = root.SelectSingleNode("time")?.InnerText;
+                    string type = root.SelectSingleNode("type")?.InnerText;
+                    string uid = root.SelectSingleNode("uid")?.InnerText;
+
+                    /*Debug.Log("----- Parsed CoT Message -----");
+                    Debug.Log($"Callsign: {callsign}");
+                    Debug.Log($"CE: {ce}");
+                    Debug.Log($"HAE: {hae}");
+                    Debug.Log($"How: {how}");
+                    Debug.Log($"Lat: {lat}");
+                    Debug.Log($"Lon: {lon}");
+                    Debug.Log($"LE: {le}");
+                    Debug.Log($"Time: {time}");
+                    Debug.Log($"Start: {start}");
+                    Debug.Log($"Stale: {stale}");
+                    Debug.Log($"Type: {type}");
+                    Debug.Log($"UID: {uid}");*/
+
+                    UnityMainThreadDispatcher.Instance().Enqueue(() =>
+                    {
+
+
+                        bool success = CreateUnit(type, callsign, double.Parse(lat), double.Parse(lon));
+                    });
+                }
+
+
+
+
+                else
+                {
+                    Debug.Log("No <root> node found.");
+                }
+
+
+            }
+            catch (Exception ex)
+            {
+                Debug.Log(doc + "\r\n\r\n" + ex.Message);
+                throw ex;
+            } 
+            
+
+
+
         }
 
         private void OnCreated(object sender, FileSystemEventArgs e)
         {
             string value = $"Created: {e.FullPath}";
-            Debug.Log(value);
-            
-            UnityMainThreadDispatcher.Instance().Enqueue(() =>
-      {
-                bool success = CreateUnit("a-f-G", 0, 0);
-            }); 
-           
+            XmlDocument doc = new XmlDocument();
+            try
+            {
+                doc.Load(e.FullPath);
+                XmlNode root = doc.SelectSingleNode("/root");
+
+                if (root != null)
+                {
+                    string callsign = root.SelectSingleNode("callsign")?.InnerText;
+                    string ce = root.SelectSingleNode("ce")?.InnerText;
+                    string hae = root.SelectSingleNode("hae")?.InnerText;
+                    string how = root.SelectSingleNode("how")?.InnerText;
+                    string lat = root.SelectSingleNode("lat")?.InnerText;
+                    string le = root.SelectSingleNode("le")?.InnerText;
+                    string lon = root.SelectSingleNode("lon")?.InnerText;
+                    string stale = root.SelectSingleNode("stale")?.InnerText;
+                    string start = root.SelectSingleNode("start")?.InnerText;
+                    string time = root.SelectSingleNode("time")?.InnerText;
+                    string type = root.SelectSingleNode("type")?.InnerText;
+                    string uid = root.SelectSingleNode("uid")?.InnerText;
+
+                    /*Debug.Log("----- Parsed CoT Message -----");
+                    Debug.Log($"Callsign: {callsign}");
+                    Debug.Log($"CE: {ce}");
+                    Debug.Log($"HAE: {hae}");
+                    Debug.Log($"How: {how}");
+                    Debug.Log($"Lat: {lat}");
+                    Debug.Log($"Lon: {lon}");
+                    Debug.Log($"LE: {le}");
+                    Debug.Log($"Time: {time}");
+                    Debug.Log($"Start: {start}");
+                    Debug.Log($"Stale: {stale}");
+                    Debug.Log($"Type: {type}");
+                    Debug.Log($"UID: {uid}");*/
+
+                    UnityMainThreadDispatcher.Instance().Enqueue(() =>
+                    {
+
+
+                        bool success = CreateUnit(type, callsign, double.Parse(lat), double.Parse(lon));
+                    });
+                }
+
+
+
+
+                else
+                {
+                    Debug.Log("No <root> node found.");
+                }
+
+
+            }
+            catch (Exception ex)
+            {
+                Debug.Log(doc + "\r\n\r\n" + ex.Message);
+                throw ex;
+            }
         }
 
         private static void OnDeleted(object sender, FileSystemEventArgs e) =>
