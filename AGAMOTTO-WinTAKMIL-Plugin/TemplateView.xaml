@@ -91,7 +91,12 @@
 
     <!-- Layout -->
     <Grid Background="#1E1E1E" Margin="12">
+        <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="180*"/>
+            <ColumnDefinition Width="29*"/>
+        </Grid.ColumnDefinitions>
         <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="*"/>
@@ -99,7 +104,7 @@
         </Grid.RowDefinitions>
 
         <!-- Connection -->
-        <Border Grid.Row="0" Style="{StaticResource CardStyle}">
+        <Border Grid.Row="0" Style="{StaticResource CardStyle}" Grid.ColumnSpan="2">
             <StackPanel>
                 <TextBlock Text="Connection" Style="{StaticResource SectionHeader}" FontSize="14"/>
                 <DockPanel LastChildFill="False">
@@ -131,14 +136,30 @@
         </Border>
 
         <!-- Send -->
-        <Border Grid.Row="1" Style="{StaticResource CardStyle}">
-            <Button Content="Send Map Data"
+        <Border Grid.Row="1" Style="{StaticResource CardStyle}" Grid.ColumnSpan="2">
+            <Button Content="Send Map Data to Listener"
                     Command="{Binding SendMapDataCommand}"
                     Style="{StaticResource PrimaryButton}"/>
         </Border>
 
-        <!-- Logs -->
+        <!-- Save to Folder -->
         <Border Grid.Row="2" Style="{StaticResource CardStyle}">
+            <StackPanel>
+                <TextBlock Text="Export (To Folder)" Style="{StaticResource SectionHeader}"/>
+                <StackPanel Orientation="Horizontal" Margin="0,6,0,10">
+                    <Button Content="Choose Folder…" Command="{Binding ChooseFolderCommand}"
+              Style="{StaticResource GhostButton}" Width="140" Margin="0,0,8,0"/>
+                    <Button Content="Save Map Data to Folder" Command="{Binding SaveToFolderCommand}"
+              Style="{StaticResource PrimaryButton}" Width="200"/>
+                </StackPanel>
+                <TextBlock Text="{Binding OutputFolder}"
+               Foreground="{StaticResource TextSecondary}"
+               TextTrimming="CharacterEllipsis"/>
+            </StackPanel>
+        </Border>
+
+        <!-- Logs -->
+        <Border Grid.Row="3" Style="{StaticResource CardStyle}" Grid.ColumnSpan="2">
             <Grid>
                 <Grid.RowDefinitions>
                     <RowDefinition Height="Auto"/>
@@ -155,7 +176,7 @@
         </Border>
 
         <!-- Assessment & Add to Map -->
-        <Border Grid.Row="3" Style="{StaticResource CardStyle}">
+        <Border Grid.Row="4" Style="{StaticResource CardStyle}" Grid.ColumnSpan="2">
             <Grid>
                 <Grid.RowDefinitions>
                     <RowDefinition Height="Auto"/>
