@@ -4,6 +4,7 @@ using System.Globalization;
 using System.Linq;
 using System.Reflection;
 using System.Xml.Linq;
+using WinTak.Common.CoT;
 using WinTak.CursorOnTarget.Services;
 using WinTak.Overlays.Services;
 using WinTak.Overlays.ViewModels;
@@ -48,7 +49,9 @@ namespace AGAMOTTO.WinTAKMIL
                 var mapItem = node.MapItem;
 
                 var uid = mapItem.Uid ?? "none";
-                var type = GetCotType(mapItem) ?? "a-f-G-U-C";
+                var type = mapItem != null ? mapItem.GetCotType() : null;
+                if (string.IsNullOrWhiteSpace(type))
+                    type = GetCotTypeFallback(mapItem) ?? "a-f-G-U-C";
 
                 var key = (uid, type);
                 if (sentKeys.Contains(key)) continue;
@@ -339,7 +342,7 @@ namespace AGAMOTTO.WinTAKMIL
             catch { return null; }
         }
 
-        private static string GetCotType(object mapItem)
+        private static string GetCotTypeFallback(object mapItem)
         {
             if (mapItem == null) return null;
 
