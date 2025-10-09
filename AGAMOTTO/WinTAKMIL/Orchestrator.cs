@@ -5,6 +5,7 @@ using System.Linq;
 using System.Reflection;
 using System.Xml.Linq;
 using WinTak.Common.CoT;
+using WinTak.Common.Utils;
 using WinTak.CursorOnTarget.Services;
 using WinTak.Overlays.Services;
 using WinTak.Overlays.ViewModels;
