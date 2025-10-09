@@ -27,3 +27,7 @@
 /AGAMOTTO/AGAMOTTO Simulation/Logs
 *.pyc
 *.xml
+*.meta
+/AGAMOTTO-WinTAKMIL-Plugin
+*.cache
+*.meta
