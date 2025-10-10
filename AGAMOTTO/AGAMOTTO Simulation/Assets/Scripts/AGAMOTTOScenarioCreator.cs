@@ -18,6 +18,7 @@ using System.Security.AccessControl;
 using System.Xml;
 using Unity.AI.Navigation;
 using UnityEngine;
+using static UnityEngine.UI.CanvasScaler;
 
 namespace AGAMOTTO
 {
@@ -109,23 +110,44 @@ namespace AGAMOTTO
 
         }
 
+        bool CreatePath(string callsign, RideVector3[] path)
+        {
+            RideVector3[] path3 = new RideVector3[] { new RideVector3(-5, 0, 0), new RideVector3(5, 0, 0) };
+
+            foreach (var agent in Globals.api.agentSystem.GetAllAgents())
+            {
+                if (Globals.api.scenarioSystem.GetEntityName(agent) == callsign)
+                {
+                    Globals.api.movementSystem.MovePath(agent, path, 1);
+                }
+            }
+
+            
+
+            return true;
+        }
+
         bool CreateUnit(string cotType, string callsign, double lat, double lng)
         {
-
+            string[] segments = cotType.Split('-');
             RideVector3 scenPos = Globals.api.terrainSystem.ConvertToScenePosition(lat, lng);
-            //35.3308510842807, -116.5211896686935
+            switch (segments[1])
+            {
+                case "f":
+                    
+                    RideID alphaSquad = Globals.api.agentSystem.CreateSquad(new UnitCreationParams(callsign) { rows = 2, cols = 2, position = scenPos, rotation = RideQuaternion.Euler(0, -90, 0), team = Team.Blue });
+                    break;
 
-            RideID alphaTeamAlphaSquad = Globals.api.agentSystem.CreateFireTeam(new UnitCreationParams("Alpha Team, Alpha Squad") { rows = 2, cols = 2, position = scenPos, rotation = RideQuaternion.Euler(0, -90, 0), team = Team.Blue });
-            RideID bravoTeamAlphaSquad = Globals.api.agentSystem.CreateFireTeam(new UnitCreationParams("Bravo Team, Alpha Squad") { rows = 2, cols = 2, position = scenPos, rotation = RideQuaternion.Euler(0, -90, 0), team = Team.Blue });
-            //RideID alphaSquadGlobals.api.agentSystem.CreateSquad(new UnitCreationParams("Alpha Squad") { rows = 2, cols = 2, position = new RideVector3(25, 0, 15), rotation = RideQuaternion.Euler(0, -90, 0), team = Team.Blue });
-            //RideID betaSquad = Globals.api.agentSystem.CreateSquad(new UnitCreationParams("Beta Squad") { rows = 2, cols = 2, position = new RideVector3(-25, 0, -5), rotation = RideQuaternion.Euler(0, 90, 0), team = Team.Blue });
-            //RideID gammaSquad = Globals.api.agentSystem.CreateSquad(new UnitCreationParams("Gamma Squad") { rows = 2, cols = 2, position = new RideVector3(-10, 0, -25), rotation = RideQuaternion.Euler(0, 180, 0), team = Team.Blue });
-            //RideID deltaSquad = Globals.api.agentSystem.CreateSquad(new UnitCreationParams("Delta Squad") { rows = 2, cols = 2, position = new RideVector3(25, 0, 5), rotation = RideQuaternion.Euler(0, 0, 0), team = Team.Blue });
-            RideID insurgents = Globals.api.agentSystem.CreateSquad(new UnitCreationParams("Insurgents") { rows = 2, cols = 2, position = scenPos, rotation = RideQuaternion.Euler(0, 0, 0), team = Team.Red });
-            RideID alphaSquad = Globals.api.groupSystem.CreateGroup("Force", null, new RideID[] { alphaTeamAlphaSquad, bravoTeamAlphaSquad });
-            //RideID platoon = Globals.api.groupSystem.CreateGroup("Force", null, new RideID[] { alphaSquad, deltaSquad, betaSquad, gammaSquad, });
-            Globals.api.agentSystem.SetAgentGroupBehaviour(alphaTeamAlphaSquad, new FireTeamWedge());
-            Globals.api.agentSystem.SetAgentGroupBehaviour(bravoTeamAlphaSquad, new FireTeamWedge());
+                case "h":
+                    RideID insurgents = Globals.api.agentSystem.CreateSquad(new UnitCreationParams(callsign) { rows = 2, cols = 2, position = scenPos, rotation = RideQuaternion.Euler(0, 0, 0), team = Team.Red });
+                    break;
+
+                default:
+                    break;  
+            }
+            
+            //Globals.api.agentSystem.SetAgentGroupBehaviour(alphaTeamAlphaSquad, new FireTeamWedge());
+            //Globals.api.agentSystem.SetAgentGroupBehaviour(bravoTeamAlphaSquad, new FireTeamWedge());
             //  Globals.api.agentSystem.SetAgentGroupBehaviour(alphaTeamAlphaSquad, new GroupMoveToPositionInFormationBehaviour() { destination = new RideVector3(0, 0, 0), formationDistance = 0.5f, formationType = FormationProcedureType.Wedge });
             return false;
         }
@@ -350,8 +372,17 @@ namespace AGAMOTTO
                     UnityMainThreadDispatcher.Instance().Enqueue(() =>
                     {
 
+                        if (type.StartsWith("a"))
+                        {
+                            bool success = CreateUnit(type, callsign, double.Parse(lat), double.Parse(lon));
+                        }
 
-                        bool success = CreateUnit(type, callsign, double.Parse(lat), double.Parse(lon));
+                        if (type.EndsWith("r"))
+                        {
+                            RideVector3[] path = new RideVector3();
+                            bool success = CreatePath(callsign, path);
+                        }
+
                     });
                 }
 
@@ -417,8 +448,10 @@ namespace AGAMOTTO
                     UnityMainThreadDispatcher.Instance().Enqueue(() =>
                     {
 
-
-                        bool success = CreateUnit(type, callsign, double.Parse(lat), double.Parse(lon));
+                        if (type.StartsWith("a"))
+                        {
+                            bool success = CreateUnit(type, callsign, double.Parse(lat), double.Parse(lon));
+                        }
                     });
                 }
 
