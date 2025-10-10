@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Globalization;
+using System.IO;
 using System.Linq;
 using System.Reflection;
 using System.Xml.Linq;
@@ -34,9 +35,22 @@ namespace AGAMOTTO.WinTAKMIL
             return true;
         }
 
+        public bool SaveCurrentSituationToFolder(IMapObjectItemManager mapObjectItemManager, string outputFolder)
+        {
+            _mapObjectItemManager = mapObjectItemManager;
+            if (_mapObjectItemManager?.RootItems == null) return false;
+
+            var docs = ExportMapObjectsToXml(_mapObjectItemManager.RootItems);
+            if (docs.Count == 0) return false;
+
+            SaveDocsToFolder(docs, outputFolder);
+            return true;
+        }
+
+
         /// <summary>
         /// Looks at all map items and creates CoT events
-        /// - Route: prefer Route.CotEvent, else build b-m-r with <detail><route><point/>
+        /// - Route: prefer Route.CotEvent, else build b-m-p-s-r with <detail><route><point/>
         /// - Non-route: basic point CoT
         /// </summary>
         public static List<XDocument> ExportMapObjectsToXml(ICollection<MapObjectItem> rootItems)
@@ -77,7 +91,7 @@ namespace AGAMOTTO.WinTAKMIL
                     var rName = mapItem.Name ?? "Route";
                     var routeEvt = BuildRouteEvent(uid, rName, DateTime.UtcNow, verts);
                     cotMessages.Add(new XDocument(new XDeclaration("1.0", "UTF-8", "yes"), routeEvt));
-                    sentKeys.Add(key);
+                    sentKeys.Add((uid, "b-m-p-s-r"));
                     continue;
                 }
 
@@ -241,7 +255,7 @@ namespace AGAMOTTO.WinTAKMIL
             return null;
         }
 
-        // CoT route builder (b-m-r + <detail><route>)
+        // CoT route builder (b-m-p-s-r + <detail><route>)
         private static XElement BuildRouteEvent(
             string uid, string name, DateTime timestamp,
             List<(double lat, double lon, double? alt)> vertices)
@@ -253,7 +267,7 @@ namespace AGAMOTTO.WinTAKMIL
             return new XElement("event",
                 new XAttribute("version", "2.0"),
                 new XAttribute("uid", uid),
-                new XAttribute("type", "b-m-r"),
+                new XAttribute("type", "b-m-p-s-r"),
                 new XAttribute("how", "m-g"),
                 new XAttribute("time", tNow),
                 new XAttribute("start", tNow),
@@ -372,5 +386,33 @@ namespace AGAMOTTO.WinTAKMIL
 
             return null;
         }
+
+        private static void SaveDocsToFolder(List<XDocument> docs, string outputFolder)
+        {
+            Directory.CreateDirectory(outputFolder);
+
+            foreach (var xdoc in docs)
+            {
+                var root = xdoc.Root;
+                var uid = root?.Attribute("uid")?.Value ?? "unknown";
+                var type = root?.Attribute("type")?.Value ?? "unknown";
+                var ts = DateTime.UtcNow.ToString("yyyyMMddTHHmmssfffZ");
+
+                var safeUid = MakeSafe(uid, 48);
+                var safeType = MakeSafe(type, 48);
+                var fileName = $"{ts}_{safeType}_{safeUid}.xml";
+
+                xdoc.Save(Path.Combine(outputFolder, fileName));
+            }
+        }
+
+        private static string MakeSafe(string s, int maxLen)
+        {
+            if (string.IsNullOrWhiteSpace(s)) return "none";
+            var invalid = Path.GetInvalidFileNameChars();
+            var filtered = new string(s.Where(c => !invalid.Contains(c)).ToArray());
+            return filtered.Length > maxLen ? filtered.Substring(0, maxLen) : filtered;
+        }
+
     }
 }

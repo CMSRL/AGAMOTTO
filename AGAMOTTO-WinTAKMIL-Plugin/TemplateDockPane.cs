@@ -11,6 +11,7 @@ using System.Windows.Media;
 using WinTak.Overlays.Services;
 using WinTak.Overlays.ViewModels;
 using AGAMOTTO.WinTAKMIL;
+using System.Windows.Forms;
 
 namespace AGAMOTTO_WinTAK_Plugin
 {
@@ -42,6 +43,16 @@ namespace AGAMOTTO_WinTAK_Plugin
         private TcpListener _resultsListener;
         private CancellationTokenSource _resultsCts;
 
+        private string _outputFolder;
+        public string OutputFolder
+        {
+            get => _outputFolder;
+            set => SetProperty(ref _outputFolder, value);
+        }
+
+        public ICommand ChooseFolderCommand { get; private set; }
+        public ICommand SaveToFolderCommand { get; private set; }
+
         [ImportingConstructor]
         public TemplateDockPane(IMapObjectItemManager mapObjectItemManager)
         {
@@ -55,6 +66,14 @@ namespace AGAMOTTO_WinTAK_Plugin
             var testCmd = new ExecutedCommand();
             testCmd.Executed += async (_, __) => await TestConnectionAsync();
             TestConnectionCommand = testCmd;
+
+            var chooseCmd = new ExecutedCommand();
+            chooseCmd.Executed += OnChooseFolderExecuted;
+            ChooseFolderCommand = chooseCmd;
+
+            var saveFolderCmd = new ExecutedCommand();
+            saveFolderCmd.Executed += OnSaveToFolderExecuted;
+            SaveToFolderCommand = saveFolderCmd;
 
             RefreshCounts(); 
             StartResultsListener();
@@ -306,6 +325,48 @@ namespace AGAMOTTO_WinTAK_Plugin
             {
                 var handler = Executed;
                 if (handler != null) handler(this, EventArgs.Empty);
+            }
+        }
+
+        private void OnChooseFolderExecuted(object sender, EventArgs e)
+        {
+            try
+            {
+                using (var dlg = new System.Windows.Forms.FolderBrowserDialog())
+                {
+                    dlg.Description = "Choose a folder for saving CoT XML files";
+                    dlg.ShowNewFolderButton = true;
+                    var result = dlg.ShowDialog();
+                    if (result == System.Windows.Forms.DialogResult.OK)
+                    {
+                        OutputFolder = dlg.SelectedPath;
+                        LogLines.Add($"[{DateTime.Now:T}] Output folder set to: {OutputFolder}");
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                LogLines.Add($"[{DateTime.Now:T}] Folder select failed: {ex.Message}");
+            }
+        }
+
+        private void OnSaveToFolderExecuted(object sender, EventArgs e)
+        {
+            if (string.IsNullOrWhiteSpace(OutputFolder))
+            {
+                LogLines.Add($"[{DateTime.Now:T}] No output folder set. Click 'Choose Folder' first.");
+                return;
+            }
+
+            try
+            {
+                var ok = _orchestrator.SaveCurrentSituationToFolder(_mapObjectItemManager, OutputFolder);
+                LogLines.Add($"[{DateTime.Now:T}] Save to folder -> {(ok ? "Saved" : "No items")}");
+                RefreshCounts();
+            }
+            catch (Exception ex)
+            {
+                LogLines.Add($"[{DateTime.Now:T}] Save failed: {ex.Message}");
             }
         }
     }
