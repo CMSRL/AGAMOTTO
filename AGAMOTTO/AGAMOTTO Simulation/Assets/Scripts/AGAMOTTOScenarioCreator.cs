@@ -1,6 +1,8 @@
+using Amazon.Rekognition.Model;
 using BllipParser.DotNet.Vanilla;
 using Fusion;
 using Pathfinding;
+using Photon.Realtime;
 using PimDeWitte.UnityMainThreadDispatcher;
 using Ride;
 using Ride.AI;
@@ -22,6 +24,23 @@ using static UnityEngine.UI.CanvasScaler;
 
 namespace AGAMOTTO
 {
+
+    public enum SimStateType
+    {
+        Idle,
+        Running,
+        Stopped,
+        GeneratingUnits,
+        LoadingTerrain,
+        TerrainLoaded
+    }
+
+    public class SimState
+    {
+        public SimStateType State { get; set; }
+        public DateTime Timestamp { get; set; }
+    }
+
     public class AGAMOTTOScenarioCreator : RideBaseMinimal
     {
 
@@ -30,12 +49,12 @@ namespace AGAMOTTO
         protected string[] m_terrainPathsTileNames;
         protected string[] m_terrainPathsLmabNames;
         protected List<Ride.Terrain.ITerrain> m_terrains = new List<Ride.Terrain.ITerrain>();
-
+        protected Dictionary<string, RideID> entityList;
         protected bool m_loadTrees { get => m_terrainLoader.m_loadTrees; set => m_terrainLoader.m_loadTrees = value; }
         protected bool m_cameraStartPosition { get => m_terrainLoader.m_cameraStartPosition; set => m_terrainLoader.m_cameraStartPosition = value; }
         protected int m_loadRadius { get => m_terrainLoader.m_renderRadius; set => m_terrainLoader.m_renderRadius = value; }
         protected float m_cpuPriority { get => m_terrainLoader.m_cpuPriority; set => m_terrainLoader.m_cpuPriority = value; }
-
+        protected SimState simulationState;
         protected int m_tileEntrySelected;
         protected int m_tileLodSelected;
         protected int m_lmabEntrySelected;
@@ -52,12 +71,34 @@ namespace AGAMOTTO
         
         protected override void Start()
         {
-
+            simulationState = new SimState();
+            simulationState.State = SimStateType.LoadingTerrain;
             base.Start();
-
+            entityList = new Dictionary<string, RideID>();
             worldStateSystem = Globals.api.worldStateSystem;
             worldStateSystem.AddListener<TerrainLoadedEvent>(WorldEvent.terrainLoaded, OnTerrainLoaded);
+            LoadTerrain();
 
+
+            Globals.api.attackSystem.flags = Ride.Combat.AttackSystemFlags.Auto_Attack;
+
+            //create a watcher to monitor input file directory for new or modified scenario files
+            string filePath = Application.streamingAssetsPath;
+            //Debug.Log(filePath);
+
+            StartCoroutine(CreateWatcher(filePath));
+            StartCoroutine(CreateNavMesh());
+
+        }
+
+        protected override void Update()
+        {
+            base.Update();
+
+        }
+
+        protected void LoadTerrain()
+        {
             m_terrainLoader = FindObjectOfType<TerrainLoader>();
             if (m_terrainLoader == null)
                 RideLogSystem.LogError("There is no TerrainLoader in this scene. The scene will not work properly without one.");
@@ -82,74 +123,77 @@ namespace AGAMOTTO
             m_terrainPathsLmabNames = namesLmab.ToArray();
 
             OnGUILoadTerrainSplitLmab();
-
-            Globals.api.attackSystem.flags = Ride.Combat.AttackSystemFlags.Auto_Attack;
-            //create a watcher to monitor input file directory for new or modified scenario files
-            string filePath = Application.streamingAssetsPath;
-            Debug.Log(filePath);
-            StartCoroutine(CreateWatcher(filePath));
-            StartCoroutine(CreateNavMesh());
-
-
-            //build test nav mesh
-            // NavMeshSurface surface = GameObject.Find("Plane").AddComponent<NavMeshSurface>();
-            //surface.BuildNavMesh();
-            //bool success = CreateUnit("a-f-G", 0, 0);
-
-        }
-
-        protected override void Update()
-        {
-            base.Update();
-
         }
         protected virtual void OnTerrainLoaded(WorldEventMarker marker, TerrainLoadedEvent e)
         {
             Debug.Log("Terrain Finished Loading");
-
+            
 
         }
 
         bool CreatePath(string callsign, RideVector3[] path)
         {
-            RideVector3[] path3 = new RideVector3[] { new RideVector3(-5, 0, 0), new RideVector3(5, 0, 0) };
-
-            foreach (var agent in Globals.api.agentSystem.GetAllAgents())
+            //set path for agent
+            //WARNING: Agent has to exist in the entityList; possible race condition
+            if (entityList.ContainsKey(callsign) && simulationState.State == SimStateType.Idle)
             {
-                if (Globals.api.scenarioSystem.GetEntityName(agent) == callsign)
-                {
-                    Globals.api.movementSystem.MovePath(agent, path, 1);
-                }
+                Globals.api.movementSystem.MoveGroupPath(entityList[callsign], path, FormationProcedureType.Wedge);
+
+            }
+            else
+            {
+                Debug.Log("Entity Associated with Route does not exist in list; Entity either does not exist or has not yet been created; please try again");
             }
 
-            
 
-            return true;
+                return true;
         }
 
-        bool CreateUnit(string cotType, string callsign, double lat, double lng)
+        bool CreateUnit(string cotType, string uid, double lat, double lng)
         {
-            string[] segments = cotType.Split('-');
-            RideVector3 scenPos = Globals.api.terrainSystem.ConvertToScenePosition(lat, lng);
-            switch (segments[1])
+            if(simulationState.State == SimStateType.TerrainLoaded || simulationState.State == SimStateType.Idle)
             {
-                case "f":
-                    
-                    RideID alphaSquad = Globals.api.agentSystem.CreateSquad(new UnitCreationParams(callsign) { rows = 2, cols = 2, position = scenPos, rotation = RideQuaternion.Euler(0, -90, 0), team = Team.Blue });
-                    break;
+                string[] segments = cotType.Split('-');
+                RideVector3 scenPos = Globals.api.terrainSystem.ConvertToScenePosition(lat, lng);
+                switch (segments[1])
+                {
+                    case "f":
+                        if (!entityList.ContainsKey(uid))
+                        {
+                            RideID alphaSquad = Globals.api.agentSystem.CreateSquad(new UnitCreationParams(uid) { rows = 2, cols = 2, position = scenPos, rotation = RideQuaternion.Euler(0, -90, 0), team = Team.Blue });
+                            entityList.Add(uid, alphaSquad);   
+                        }
+                        simulationState.State = SimStateType.Idle;
+                        return true;
+                        //break;
 
-                case "h":
-                    RideID insurgents = Globals.api.agentSystem.CreateSquad(new UnitCreationParams(callsign) { rows = 2, cols = 2, position = scenPos, rotation = RideQuaternion.Euler(0, 0, 0), team = Team.Red });
-                    break;
+                    case "h":
+                        if (!entityList.ContainsKey(uid))
+                        {
+                            RideID insurgents = Globals.api.agentSystem.CreateSquad(new UnitCreationParams(uid) { rows = 2, cols = 2, position = scenPos, rotation = RideQuaternion.Euler(0, 0, 0), team = Team.Red });
+                            entityList.Add(uid, insurgents);
+                        }
+                        simulationState.State = SimStateType.Idle;
+                        return true;
+                        //break;
 
-                default:
-                    break;  
+                    //default:
+                        //return false;
+                        //break;
+                }
+                return true;
             }
-            
-            //Globals.api.agentSystem.SetAgentGroupBehaviour(alphaTeamAlphaSquad, new FireTeamWedge());
-            //Globals.api.agentSystem.SetAgentGroupBehaviour(bravoTeamAlphaSquad, new FireTeamWedge());
-            //  Globals.api.agentSystem.SetAgentGroupBehaviour(alphaTeamAlphaSquad, new GroupMoveToPositionInFormationBehaviour() { destination = new RideVector3(0, 0, 0), formationDistance = 0.5f, formationType = FormationProcedureType.Wedge });
-            return false;
+            else
+            {
+                Debug.Log("Terrain Not Loaded - Cannot Create Units");
+                return false;
+            }
+
+
+                //Globals.api.agentSystem.SetAgentGroupBehaviour(alphaTeamAlphaSquad, new FireTeamWedge());
+                //Globals.api.agentSystem.SetAgentGroupBehaviour(bravoTeamAlphaSquad, new FireTeamWedge());
+                //  Globals.api.agentSystem.SetAgentGroupBehaviour(alphaTeamAlphaSquad, new GroupMoveToPositionInFormationBehaviour() { destination = new RideVector3(0, 0, 0), formationDistance = 0.5f, formationType = FormationProcedureType.Wedge });
+
         }
 
         protected virtual void OnGUILoadTerrainSplitLmab()
@@ -288,6 +332,7 @@ namespace AGAMOTTO
             //build nav mesh
             NavMeshSurface surface = GameObject.Find("TerrainRoot").AddComponent<NavMeshSurface>();
             surface.BuildNavMesh();
+            simulationState.State = SimStateType.TerrainLoaded;
         }
 
         IEnumerator CreateWatcher(string folder)
@@ -338,11 +383,26 @@ namespace AGAMOTTO
             try
             {
                 doc.Load(e.FullPath);
-                XmlNode root = doc.SelectSingleNode("/root");
+                //Debug.Log(doc.InnerText);
+                XmlNode root = doc.SelectSingleNode("/event");
 
                 if (root != null)
                 {
-                    string callsign = root.SelectSingleNode("callsign")?.InnerText;
+
+
+                    string uid = root.Attributes["uid"]?.Value;
+                    string type = root.Attributes["type"]?.Value;
+                    string time = root.Attributes["time"]?.Value;
+                    
+                    XmlNode pointNode = root.SelectSingleNode("point");
+                    string lat = pointNode.Attributes["lat"]?.Value;
+                    string lon = pointNode.Attributes["lon"]?.Value;
+
+                    XmlNode contactNode = root.SelectSingleNode("detail/contact");
+                    string callsign = contactNode?.Attributes["callsign"]?.Value;
+
+
+                    /*string callsign = root.SelectSingleNode("callsign")?.InnerText;
                     string ce = root.SelectSingleNode("ce")?.InnerText;
                     string hae = root.SelectSingleNode("hae")?.InnerText;
                     string how = root.SelectSingleNode("how")?.InnerText;
@@ -352,8 +412,8 @@ namespace AGAMOTTO
                     string stale = root.SelectSingleNode("stale")?.InnerText;
                     string start = root.SelectSingleNode("start")?.InnerText;
                     string time = root.SelectSingleNode("time")?.InnerText;
-                    string type = root.SelectSingleNode("type")?.InnerText;
-                    string uid = root.SelectSingleNode("uid")?.InnerText;
+                    string type = root.SelectSingleNode("type")?.Value;
+                    string uid = root.SelectSingleNode("uid")?.InnerText;*/
 
                     /*Debug.Log("----- Parsed CoT Message -----");
                     Debug.Log($"Callsign: {callsign}");
@@ -372,14 +432,40 @@ namespace AGAMOTTO
                     UnityMainThreadDispatcher.Instance().Enqueue(() =>
                     {
 
-                        if (type.StartsWith("a"))
+                        if (type != null && type.StartsWith("a"))
                         {
-                            bool success = CreateUnit(type, callsign, double.Parse(lat), double.Parse(lon));
+                            bool success = CreateUnit(type, uid, double.Parse(lat), double.Parse(lon));
                         }
 
-                        if (type.EndsWith("r"))
+                        if (type != null && type.EndsWith("r"))
                         {
-                            RideVector3[] path = new RideVector3();
+                            //Debug.Log("Received a route");
+                            //Debug.Log(type);
+                            XmlNode routeNode = root.SelectSingleNode("detail/route");
+
+                            int routeSize = 0;
+
+                            // inelegant; replace
+                            foreach (XmlNode point in routeNode)
+                            {
+                                routeSize++;
+                            }
+                            RideVector3[] path = new RideVector3[routeSize];
+
+                            //Debug.Log(routeSize);
+                            int counter = 0;
+                            foreach (XmlNode point in routeNode)
+                            {
+                                string lat = point.Attributes["lat"]?.Value;
+                                string lon = point.Attributes["lon"]?.Value;
+                                string hae = point.Attributes["hae"]?.Value;
+                                RideVector3 scenPos = Globals.api.terrainSystem.ConvertToScenePosition(Convert.ToDouble(lat), Convert.ToDouble(lon));
+                                path[counter] = scenPos;
+                                //Debug.Log($"Point - Lat: {lat}, Lon: {lon}, HAE: {hae}");
+                                counter++;
+                            }
+                            Debug.Log($"Attempting to create path for {callsign}");
+                            //associate with existing entity
                             bool success = CreatePath(callsign, path);
                         }
 
@@ -447,7 +533,7 @@ namespace AGAMOTTO
 
                     UnityMainThreadDispatcher.Instance().Enqueue(() =>
                     {
-
+                        //a = atomic, meaning it is a physical entity
                         if (type.StartsWith("a"))
                         {
                             bool success = CreateUnit(type, callsign, double.Parse(lat), double.Parse(lon));
