@@ -20,7 +20,9 @@ using System.Security.AccessControl;
 using System.Xml;
 using Unity.AI.Navigation;
 using UnityEngine;
+using UnityEngine.Serialization;
 using static UnityEngine.UI.CanvasScaler;
+using System.Linq;
 
 namespace AGAMOTTO
 {
@@ -40,6 +42,8 @@ namespace AGAMOTTO
         public SimStateType State { get; set; }
         public DateTime Timestamp { get; set; }
     }
+
+
 
     public class AGAMOTTOScenarioCreator : RideBaseMinimal
     {
@@ -68,7 +72,11 @@ namespace AGAMOTTO
         float m_startTime = 0;
 
         IWorldStateSystem worldStateSystem;
-        
+
+        [FormerlySerializedAs("sceneGameObjects")]
+        public GameObject[] m_settingsPrefabGameObjects;
+
+
         protected override void Start()
         {
             simulationState = new SimState();
@@ -79,7 +87,7 @@ namespace AGAMOTTO
             worldStateSystem.AddListener<TerrainLoadedEvent>(WorldEvent.terrainLoaded, OnTerrainLoaded);
             LoadTerrain();
 
-
+            //change later, gives all agents authority to attack at will
             Globals.api.attackSystem.flags = Ride.Combat.AttackSystemFlags.Auto_Attack;
 
             //create a watcher to monitor input file directory for new or modified scenario files
@@ -175,11 +183,7 @@ namespace AGAMOTTO
                         }
                         simulationState.State = SimStateType.Idle;
                         return true;
-                        //break;
 
-                    //default:
-                        //return false;
-                        //break;
                 }
                 return true;
             }
@@ -189,10 +193,65 @@ namespace AGAMOTTO
                 return false;
             }
 
+        }
 
-                //Globals.api.agentSystem.SetAgentGroupBehaviour(alphaTeamAlphaSquad, new FireTeamWedge());
-                //Globals.api.agentSystem.SetAgentGroupBehaviour(bravoTeamAlphaSquad, new FireTeamWedge());
-                //  Globals.api.agentSystem.SetAgentGroupBehaviour(alphaTeamAlphaSquad, new GroupMoveToPositionInFormationBehaviour() { destination = new RideVector3(0, 0, 0), formationDistance = 0.5f, formationType = FormationProcedureType.Wedge });
+        bool CreateMLUnit(string cotType, string uid, double lat, double lng)
+        {
+            if (simulationState.State == SimStateType.TerrainLoaded || simulationState.State == SimStateType.Idle)
+            {
+                string[] segments = cotType.Split('-');
+                RideVector3 scenPos = Globals.api.terrainSystem.ConvertToScenePosition(lat, lng);
+                IGroupSystem groupSystem = Globals.api.groupSystem;
+                switch (segments[1])
+                {
+                    case "f":
+                        if (!entityList.ContainsKey(uid))
+                        {
+                            //create custom ML-enabled prefab 
+                            RideID alphaSquad = Globals.api.agentSystem.CreateSquad(new UnitCreationParams(uid) {prefab = "ChrUsaArmyInfantryOcpMLPrefab", rows = 2, cols = 2, position = scenPos, rotation = RideQuaternion.Euler(0, -90, 0), team = Team.Blue });
+                            RideID groupLeaderId = groupSystem.GetGroupLeader(alphaSquad);
+                            IEnumerable<RideID> mlAgents = Globals.api.scenarioSystem.GetAgents(Team.Blue);
+
+                            var goSystem = Globals.api.GetSystem<IGameObjectSystem>();
+
+                            //collect settings specific to ATD, which includes custom ATD agent
+                            GameObject settings = m_settingsPrefabGameObjects.FirstOrDefault(obj => obj.name == "AttackToDestroyMLSettings");
+                            AGAMOTTO_RL_Behavior RLBehavior= new AGAMOTTO_RL_Behavior(settings, RideUtils.Infinity);
+                            foreach (var agent in mlAgents)
+                            {
+                                Globals.api.agentSystem.SetAgentBehaviour(agent, RLBehavior);
+                            }
+                            //Globals.api.agentSystem.SetAgentBehaviour(groupLeaderId, attackToDestroy);
+
+
+                            entityList.Add(uid, alphaSquad);
+                        }
+                        
+
+
+                        simulationState.State = SimStateType.Idle;
+                        return true;
+                    //break;
+
+                    case "h":
+                        if (!entityList.ContainsKey(uid))
+                        {
+                            RideID insurgents = Globals.api.agentSystem.CreateSquad(new UnitCreationParams(uid) {prefab = "ChrIrqInsurgentMleAdultAvg01Prefab", rows = 2, cols = 2, position = scenPos, rotation = RideQuaternion.Euler(0, 0, 0), team = Team.Red });
+                            RideID groupLeaderId = groupSystem.GetGroupLeader(insurgents);
+                            //goSystem.AddComponent<AGAMOTTOMLAgent>(groupLeaderId);
+                            entityList.Add(uid, insurgents);
+                        }
+                        simulationState.State = SimStateType.Idle;
+                        return true;
+
+                }
+                return true;
+            }
+            else
+            {
+                Debug.Log("Terrain Not Loaded - Cannot Create Units");
+                return false;
+            }
 
         }
 
@@ -434,7 +493,7 @@ namespace AGAMOTTO
 
                         if (type != null && type.StartsWith("a"))
                         {
-                            bool success = CreateUnit(type, uid, double.Parse(lat), double.Parse(lon));
+                            bool success = CreateMLUnit(type, uid, double.Parse(lat), double.Parse(lon));
                         }
 
                         if (type != null && type.EndsWith("r"))
@@ -466,7 +525,8 @@ namespace AGAMOTTO
                             }
                             Debug.Log($"Attempting to create path for {callsign}");
                             //associate with existing entity
-                            bool success = CreatePath(callsign, path);
+                            //Commented our for ML Agent testing; create branch for each expected AGAMOTTO functionality.
+                            //bool success = CreatePath(callsign, path);
                         }
 
                     });
