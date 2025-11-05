@@ -25,8 +25,9 @@ def save_xml(kind, uid, xml_data):
     out_path = os.path.join(base, f"{uid}.xml")
     #with open(out_path, "w", encoding="utf-8") as f:
         #f.write(xml_data)
-    tree = ET.ElementTree(xml_data)
-    tree.write(f"{out_path}{uid}.xml", encoding="utf-8", xml_declaration=True)
+    # tree = ET.ElementTree(xml_data)
+    # tree.write(f"{out_path}{uid}.xml", encoding="utf-8", xml_declaration=True)
+    ET.ElementTree(xml_data).write(out_path, encoding="utf-8", xml_declaration=True)
     print(f"[UNITY] wrote {out_path}")
 
 def try_link_route_to_entity(route, entities):
@@ -105,7 +106,7 @@ def start_server():
 
                             #rename the route name to the associated callsign of the entity to whom the route belongs
                             contact = raw_xml.find(".//contact")
-                            if contact is not None:
+                            if contact is not None and linked_uid:
                                 contact.set("callsign", linked_uid)
 
                             save_xml("route", route_uid, raw_xml)

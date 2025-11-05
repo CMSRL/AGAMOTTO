@@ -52,6 +52,7 @@ def parse_cot(xml_string):
         data['start'] = root.attrib.get('start')
         data['stale'] = root.attrib.get('stale')
         data['how'] = root.attrib.get('how')
+        data['mode']  = root.attrib.get('mode')
 
     # Location info
     point = root.find('point')
