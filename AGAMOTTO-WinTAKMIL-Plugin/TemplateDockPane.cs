@@ -52,6 +52,8 @@ namespace AGAMOTTO_WinTAK_Plugin
 
         public ICommand ChooseFolderCommand { get; private set; }
         public ICommand SaveToFolderCommand { get; private set; }
+        public ICommand SetVisualizationModeCommand { get; private set; }
+        public ICommand SetTrainingModeCommand { get; private set; }
 
         [ImportingConstructor]
         public TemplateDockPane(IMapObjectItemManager mapObjectItemManager)
@@ -74,6 +76,14 @@ namespace AGAMOTTO_WinTAK_Plugin
             var saveFolderCmd = new ExecutedCommand();
             saveFolderCmd.Executed += OnSaveToFolderExecuted;
             SaveToFolderCommand = saveFolderCmd;
+
+            var setVisCmd = new ExecutedCommand();
+            setVisCmd.Executed += (_, __) => { _orchestrator.CurrentMode = AGAMOTTO.WinTAKMIL.DispatchMode.Visualization; LogLines.Add($"[{DateTime.Now:T}] Mode set: visualization"); };
+            SetVisualizationModeCommand = setVisCmd;
+            
+            var setTrainCmd = new ExecutedCommand();
+            setTrainCmd.Executed += (_, __) => { _orchestrator.CurrentMode = AGAMOTTO.WinTAKMIL.DispatchMode.Training; LogLines.Add($"[{DateTime.Now:T}] Mode set: training"); };
+            SetTrainingModeCommand = setTrainCmd;
 
             RefreshCounts(); 
             StartResultsListener();
@@ -182,7 +192,8 @@ namespace AGAMOTTO_WinTAK_Plugin
         {
             RefreshCounts();
             var success = _orchestrator.SendCurrentSituation(_mapObjectItemManager, IpAddress);
-            LogLines.Add($"[{DateTime.Now:T}] Send Map Data -> {(success ? "Sent" : "No items")}");
+            var mode = _orchestrator.CurrentMode == AGAMOTTO.WinTAKMIL.DispatchMode.Training ? "training" : "visualization";
+            LogLines.Add($"[{DateTime.Now:T}] Send Map Data ({mode}) -> {(success ? "Sent" : "No items")}");
             RefreshCounts();
         }
 
@@ -361,7 +372,8 @@ namespace AGAMOTTO_WinTAK_Plugin
             try
             {
                 var ok = _orchestrator.SaveCurrentSituationToFolder(_mapObjectItemManager, OutputFolder);
-                LogLines.Add($"[{DateTime.Now:T}] Save to folder -> {(ok ? "Saved" : "No items")}");
+                var mode = _orchestrator.CurrentMode == AGAMOTTO.WinTAKMIL.DispatchMode.Training ? "training" : "visualization";
+                LogLines.Add($"[{DateTime.Now:T}] Save to folder ({mode}) -> {(ok ? "Saved" : "No items")}");
                 RefreshCounts();
             }
             catch (Exception ex)

@@ -87,6 +87,35 @@
                        FontFamily="Consolas"
                        Foreground="{StaticResource TextPrimary}"/>
         </DataTemplate>
+
+        <Style x:Key="DarkRadio" TargetType="RadioButton">
+            <Setter Property="Foreground" Value="{StaticResource TextPrimary}"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="RadioButton">
+                        <StackPanel Orientation="Horizontal">
+                            <Grid Width="16" Height="16" Margin="0,0,8,0">
+                                <!-- outer ring -->
+                                <Ellipse Stroke="{StaticResource CardBorder}" StrokeThickness="1" Fill="#2B2B2B"/>
+                                <!-- inner dot -->
+                                <Ellipse x:Name="Dot" Width="10" Height="10" Fill="{StaticResource Accent}" Visibility="Hidden"/>
+                            </Grid>
+                            <ContentPresenter VerticalAlignment="Center"/>
+                        </StackPanel>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsChecked" Value="True">
+                                <Setter TargetName="Dot" Property="Visibility" Value="Visible"/>
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter Property="Opacity" Value="0.5"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+        
     </UserControl.Resources>
 
     <!-- Layout -->
@@ -116,7 +145,10 @@
                         <TextBox Text="{Binding TargetPort, UpdateSourceTrigger=PropertyChanged}" Width="90" Margin="0,0,16,0" ToolTip="65432"/>
 
                         <Button Content="Test Connection" Command="{Binding TestConnectionCommand}"
-                                Style="{StaticResource GhostButton}" Width="140"/>
+                                Style="{StaticResource GhostButton}" Width="140" Margin="0,0,8,0"/>
+                        
+                        <Button Content="Send Map Data to Listener" Command="{Binding SendMapDataCommand}"
+                                Style="{StaticResource PrimaryButton}" Width="200"/>
 
                         <TextBlock Text="{Binding ConnectionStatusText}"
                                    Foreground="{Binding ConnectionStatusBrush}"
@@ -135,15 +167,31 @@
             </StackPanel>
         </Border>
 
-        <!-- Send -->
+        <!-- Configuration -->
         <Border Grid.Row="1" Style="{StaticResource CardStyle}" Grid.ColumnSpan="2">
-            <Button Content="Send Map Data to Listener"
-                    Command="{Binding SendMapDataCommand}"
-                    Style="{StaticResource PrimaryButton}"/>
+            <StackPanel>
+                <TextBlock Text="Configuration" Style="{StaticResource SectionHeader}" FontSize="14"/>
+
+                <!-- Mode -->
+                <StackPanel Orientation="Horizontal" Margin="0,6,0,0">
+                    <TextBlock Text="Mode:" Style="{StaticResource LabelText}" Margin="0,0,12,0"/>
+                    <RadioButton Content="Visualization"
+                     GroupName="Mode"
+                     IsChecked="True"
+                     Command="{Binding SetVisualizationModeCommand}"
+                     Margin="0,0,16,0"
+                     Style="{StaticResource DarkRadio}"/>
+
+                    <RadioButton Content="Training"
+                     GroupName="Mode"
+                     Command="{Binding SetTrainingModeCommand}"
+                     Style="{StaticResource DarkRadio}"/>
+                </StackPanel>
+            </StackPanel>
         </Border>
 
         <!-- Save to Folder -->
-        <Border Grid.Row="2" Style="{StaticResource CardStyle}">
+        <Border Grid.Row="2" Style="{StaticResource CardStyle}" Grid.ColumnSpan="2">
             <StackPanel>
                 <TextBlock Text="Export (To Folder)" Style="{StaticResource SectionHeader}"/>
                 <StackPanel Orientation="Horizontal" Margin="0,6,0,10">
@@ -206,13 +254,15 @@
                 </ListBox>
 
                 <!-- Button: adds selected (or all if none selected) -->
-                <Button Grid.Row="2"
+                <!--
+                                <Button Grid.Row="2"
                         Content="Add to Map"
                         Style="{StaticResource PrimaryButton}"
                         HorizontalAlignment="Right"
                         Width="120"
                         Command="{Binding AddAssessmentToMapCommand}"
                         CommandParameter="{Binding SelectedItems, ElementName=AssessmentList}" />
+                -->
             </Grid>
         </Border>
     </Grid>
