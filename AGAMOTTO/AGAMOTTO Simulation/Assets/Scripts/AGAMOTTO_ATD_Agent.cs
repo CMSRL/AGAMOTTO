@@ -17,7 +17,8 @@ public class AGAMOTTO_ATD_Agent : RLAgent
 
     public RideID m_enemy;
     public RideVector3 m_startingPosition;
-
+    public RideVector3 m_enemyStartingPosition;
+    private Vector3 previousPosition;
     public override void OnEpisodeBegin()
     {
         
@@ -42,11 +43,26 @@ public class AGAMOTTO_ATD_Agent : RLAgent
         sensor.AddObservation(enemyPos.x);
         sensor.AddObservation(enemyPos.z);
 
-        // cover x and z
-        //sensor.AddObservation(m_goal.transform.position.x);
+        // direction to enemy
+        Vector3 direction = (agentTransform.position - enemyPos).normalized;
+        sensor.AddObservation(direction.x);
+        sensor.AddObservation(direction.y);
+        sensor.AddObservation(direction.z);
         //sensor.AddObservation(m_goal.transform.position.z);
-    }
 
+        //where agent is facing
+        sensor.AddObservation(transform.forward);
+
+    }
+    private void OnCollisionEnter(Collision collision)
+    {
+
+        AddReward(-1.0f); // Penalty for hitting obstacle
+        Debug.Log("Obstacle!");
+        DispatchTrainingResult(false);
+        //EndEpisode();
+
+    }
     protected override void TakeAction(ActionBuffers actions)
     {
         IAgentSystem agentSystem = Globals.api.agentSystem;
@@ -54,39 +70,22 @@ public class AGAMOTTO_ATD_Agent : RLAgent
 
         var dirToGo = Vector3.zero;
         var rotateDir = RideVector3.zero;
-        var action = actions.DiscreteActions[0];
 
-        switch (action)
-        {
-            case 0:
-                dirToGo = agentTransform.forward * 1f;
-                break;
-            case 1:
-                dirToGo = agentTransform.forward * -1f;
-                break;
-            case 2:
-                dirToGo = agentTransform.right * -0.75f;
-                break;
-            case 3:
-                dirToGo = agentTransform.right * 0.75f;
-                break;
-            case 4:
-                break;
-            case 5:
-                break;
-            case 6:
-                break;
-        }
+        float dirToGoDegrees = Mathf.Clamp(actions.ContinuousActions[0], -1f, 1f);
 
-        Vector3 newPos = agentTransform.position + (dirToGo.normalized * api.movementSystem.GetMoverSpeed(agent));
+        float angleRadians = dirToGoDegrees * Mathf.Deg2Rad;
 
-        if (api.movementSystem.IsPathValid(agentTransform.position, newPos))
+        Vector3 direction = new Vector3(Mathf.Cos(angleRadians), 0, Mathf.Sin(angleRadians));
+
+        Vector3 newPos = agentTransform.position + (direction.normalized * api.movementSystem.GetMoverSpeed(agent));
+
+        if (api.movementSystem.IsPathValid(agentTransform.position, new RideVector3(newPos)))
         {
             api.movementSystem.MoveToPosition(agent, new RideVector3(newPos));
             //api.movementSystem.MoveToPositionInFormation(agent, new RideVector3(newPos), FormationProcedureType.Wedge);
         }
 
-        agentSystem.SetAgentState(agent, StateMachineUtils.MoveState);
+    agentSystem.SetAgentState(agent, StateMachineUtils.MoveState);
 
         if (agentSystem.IsAgentDead(m_enemy))
         {
@@ -104,14 +103,36 @@ public class AGAMOTTO_ATD_Agent : RLAgent
 
         else if (stepCount >= MaxStep)
         {
-            AddReward(-1 * m_successReward);
+            //AddReward(-1);
             DispatchTrainingResult(false);
-            EndEpisode();
+            //EndEpisode();
         }
         RideVector3 enemyPos = api.GetSystem<ITransformSystem>().GetPosition(m_enemy);
-        float enemyDist = (agentTransform.position - enemyPos).magnitude;
-        AddReward(1f / enemyDist);
-        AddReward(-1f / MaxStep);
+        float enemyDist = Vector3.Distance(agentTransform.position, enemyPos);
+        //float originalEnemyDistance = Vector3.Distance(m_enemyStartingPosition, enemyPos);
+
+        float previousDistance = Vector3.Distance(previousPosition, enemyPos);
+        float currentDistance = Vector3.Distance(transform.position, enemyPos);
+
+        //AddReward(enemyDist - originalEnemyDistance + (-1f / MaxStep));
+
+
+        float progressReward = previousDistance - enemyDist;
+
+        AddReward(progressReward * 1f); // Scale as needed
+
+        // 2. Small reward for moving (to discourage standing still)
+        float movement = Vector3.Distance(transform.position, previousPosition);
+        AddReward(movement * 1f);
+
+        // 3. Penalty for moving away from the enemy
+        if (progressReward < 0)
+        {
+            AddReward(progressReward * 0.5f); // Negative reward
+        }
+
+        previousPosition = transform.position;
+        //AddReward(-1f / MaxStep);
     }
 
     public override void Heuristic(in ActionBuffers actionsOut)
