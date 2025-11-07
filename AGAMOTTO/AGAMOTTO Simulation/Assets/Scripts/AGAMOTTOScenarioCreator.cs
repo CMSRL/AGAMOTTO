@@ -459,75 +459,58 @@ namespace AGAMOTTO
 
                     XmlNode contactNode = root.SelectSingleNode("detail/contact");
                     string callsign = contactNode?.Attributes["callsign"]?.Value;
-
-
-                    /*string callsign = root.SelectSingleNode("callsign")?.InnerText;
-                    string ce = root.SelectSingleNode("ce")?.InnerText;
-                    string hae = root.SelectSingleNode("hae")?.InnerText;
-                    string how = root.SelectSingleNode("how")?.InnerText;
-                    string lat = root.SelectSingleNode("lat")?.InnerText;
-                    string le = root.SelectSingleNode("le")?.InnerText;
-                    string lon = root.SelectSingleNode("lon")?.InnerText;
-                    string stale = root.SelectSingleNode("stale")?.InnerText;
-                    string start = root.SelectSingleNode("start")?.InnerText;
-                    string time = root.SelectSingleNode("time")?.InnerText;
-                    string type = root.SelectSingleNode("type")?.Value;
-                    string uid = root.SelectSingleNode("uid")?.InnerText;*/
-
-                    /*Debug.Log("----- Parsed CoT Message -----");
-                    Debug.Log($"Callsign: {callsign}");
-                    Debug.Log($"CE: {ce}");
-                    Debug.Log($"HAE: {hae}");
-                    Debug.Log($"How: {how}");
-                    Debug.Log($"Lat: {lat}");
-                    Debug.Log($"Lon: {lon}");
-                    Debug.Log($"LE: {le}");
-                    Debug.Log($"Time: {time}");
-                    Debug.Log($"Start: {start}");
-                    Debug.Log($"Stale: {stale}");
-                    Debug.Log($"Type: {type}");
-                    Debug.Log($"UID: {uid}");*/
+                    string mode = root.Attributes["mode"]?.Value;
 
                     UnityMainThreadDispatcher.Instance().Enqueue(() =>
                     {
-
-                        if (type != null && type.StartsWith("a"))
+                        if (mode.Equals("training"))
                         {
-                            bool success = CreateMLUnit(type, uid, double.Parse(lat), double.Parse(lon));
+                            if (type != null && type.StartsWith("a"))
+                            {
+                                bool success = CreateMLUnit(type, uid, double.Parse(lat), double.Parse(lon));
+                            }
+
+                        }
+                        else
+                        {
+                            if (type != null && type.StartsWith("a"))
+                            {
+                                bool success = CreateUnit(type, uid, double.Parse(lat), double.Parse(lon));
+                            }
+
+                            if (type != null && type.EndsWith("r"))
+                            {
+                                //Debug.Log("Received a route");
+                                //Debug.Log(type);
+                                XmlNode routeNode = root.SelectSingleNode("detail/route");
+
+                                int routeSize = 0;
+
+                                // inelegant; replace
+                                foreach (XmlNode point in routeNode)
+                                {
+                                    routeSize++;
+                                }
+                                RideVector3[] path = new RideVector3[routeSize];
+
+                                //Debug.Log(routeSize);
+                                int counter = 0;
+                                foreach (XmlNode point in routeNode)
+                                {
+                                    string lat = point.Attributes["lat"]?.Value;
+                                    string lon = point.Attributes["lon"]?.Value;
+                                    string hae = point.Attributes["hae"]?.Value;
+                                    RideVector3 scenPos = Globals.api.terrainSystem.ConvertToScenePosition(Convert.ToDouble(lat), Convert.ToDouble(lon));
+                                    path[counter] = scenPos;
+                                    //Debug.Log($"Point - Lat: {lat}, Lon: {lon}, HAE: {hae}");
+                                    counter++;
+                                }
+                                Debug.Log($"Attempting to create path for {callsign}");
+                                //associate with existing entity
+                                bool success = CreatePath(callsign, path);
+                            }
                         }
 
-                        if (type != null && type.EndsWith("r"))
-                        {
-                            //Debug.Log("Received a route");
-                            //Debug.Log(type);
-                            XmlNode routeNode = root.SelectSingleNode("detail/route");
-
-                            int routeSize = 0;
-
-                            // inelegant; replace
-                            foreach (XmlNode point in routeNode)
-                            {
-                                routeSize++;
-                            }
-                            RideVector3[] path = new RideVector3[routeSize];
-
-                            //Debug.Log(routeSize);
-                            int counter = 0;
-                            foreach (XmlNode point in routeNode)
-                            {
-                                string lat = point.Attributes["lat"]?.Value;
-                                string lon = point.Attributes["lon"]?.Value;
-                                string hae = point.Attributes["hae"]?.Value;
-                                RideVector3 scenPos = Globals.api.terrainSystem.ConvertToScenePosition(Convert.ToDouble(lat), Convert.ToDouble(lon));
-                                path[counter] = scenPos;
-                                //Debug.Log($"Point - Lat: {lat}, Lon: {lon}, HAE: {hae}");
-                                counter++;
-                            }
-                            Debug.Log($"Attempting to create path for {callsign}");
-                            //associate with existing entity
-                            //Commented our for ML Agent testing; create branch for each expected AGAMOTTO functionality.
-                            //bool success = CreatePath(callsign, path);
-                        }
 
                     });
                 }
