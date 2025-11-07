@@ -11,13 +11,13 @@ GameObject:
   - component: {fileID: 2438537140461794985}
   - component: {fileID: 2438537140461794986}
   - component: {fileID: 2438537140461794991}
+  - component: {fileID: -703227733845737399}
+  - component: {fileID: 1589457156328992152}
   - component: {fileID: 2438537140461794989}
   - component: {fileID: 2438537140461794990}
   - component: {fileID: -1478815951321030541}
   - component: {fileID: 8710029262310393097}
   - component: {fileID: -6179011931364519791}
-  - component: {fileID: -703227733845737399}
-  - component: {fileID: 1589457156328992152}
   m_Layer: 0
   m_Name: AttackToDestroyMLSettings
   m_TagString: Untagged
@@ -65,23 +65,65 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   m_BrainParameters:
-    VectorObservationSize: 2
-    NumStackedVectorObservations: 2
+    VectorObservationSize: 10
+    NumStackedVectorObservations: 1
     m_ActionSpec:
-      m_NumContinuousActions: 0
-      BranchSizes: 04000000
-    VectorActionSize: 04000000
+      m_NumContinuousActions: 1
+      BranchSizes: 
+    VectorActionSize: 01000000
     VectorActionDescriptions: []
-    VectorActionSpaceType: 0
+    VectorActionSpaceType: 1
     hasUpgradedBrainParametersWithActionSpec: 1
   m_Model: {fileID: 0}
-  m_InferenceDevice: 0
+  m_InferenceDevice: 1
   m_BehaviorType: 0
   m_BehaviorName: AGAMOTTO_RL
   TeamId: 0
   m_UseChildSensors: 1
   m_UseChildActuators: 1
   m_ObservableAttributeHandling: 0
+--- !u!114 &-703227733845737399
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 2438537140461794987}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 745e280e5fb13c845a26713e171eb1a3, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  agentParameters:
+    maxStep: 0
+  hasUpgradedFromAgentParameters: 1
+  MaxStep: 5000
+  m_successReward: 100
+  m_enemy:
+    id: 0
+    version: 0
+  m_startingPosition:
+    x: 0
+    y: 0
+    z: 0
+  m_enemyStartingPosition:
+    x: 0
+    y: 0
+    z: 0
+--- !u!114 &1589457156328992152
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 2438537140461794987}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 3a5c9d521e5ef4759a8246a07d52221e, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  DecisionPeriod: 5
+  TakeActionsBetweenDecisions: 1
 --- !u!114 &2438537140461794989
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -182,41 +224,3 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: feb7df2f347c3014eb9f211a2f319843, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
---- !u!114 &-703227733845737399
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 2438537140461794987}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 745e280e5fb13c845a26713e171eb1a3, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: 
-  agentParameters:
-    maxStep: 0
-  hasUpgradedFromAgentParameters: 1
-  MaxStep: 5000
-  m_successReward: 100
-  m_enemy:
-    id: 0
-    version: 0
-  m_startingPosition:
-    x: 0
-    y: 0
-    z: 0
---- !u!114 &1589457156328992152
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 2438537140461794987}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 3a5c9d521e5ef4759a8246a07d52221e, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: 
-  DecisionPeriod: 5
-  TakeActionsBetweenDecisions: 1

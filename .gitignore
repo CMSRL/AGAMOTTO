@@ -32,3 +32,8 @@
 *.cache
 *.meta
 /AGAMOTTO/AGAMOTTO Simulation/ProjectSettings
+/AGAMOTTO/AGAMOTTO Simulation/Assets/Scenes/BaseScene
+AGAMOTTO/AGAMOTTO Simulation/Assets/StreamingAssets/68814936-b813-4bdd-8d58-e9734d9c04d9.xml
+AGAMOTTO/AGAMOTTO Simulation/Assets/StreamingAssets/68814936-b813-4bdd-8d58-e9734d9c04d9.xml.meta
+AGAMOTTO/AGAMOTTO Simulation/Assets/StreamingAssets/68814936-b813-4bdd-8d58-e9734d9c04d9received.xml
+AGAMOTTO/AGAMOTTO Simulation/Assets/StreamingAssets/68814936-b813-4bdd-8d58-e9734d9c04d9received.xml.meta
