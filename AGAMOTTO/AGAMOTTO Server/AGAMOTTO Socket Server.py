@@ -2,25 +2,33 @@ import socket
 import os
 import sys
 
-from XMLHelpers import parse_cot
+import xmltodict
+from dict2xml import dict2xml
+from XMLHelpers import parse_cot, generate_cot_point, generate_cot_point_wrapper
+from xml.etree.ElementTree import Element, SubElement, tostring
+import xml.etree.ElementTree as ET
 
 HOST = '127.0.0.1'  # Localhost
 PORT = 65432        # Port to listen on
 
-def receive_xml(conn):
-    xml_data = conn.recv(1024).decode('utf-8')  # Receive up to 1024 bytes
-    with open("received.xml", "w", encoding="utf-8") as f:
-        f.write(xml_data)
-    print("XML file received and saved as 'received.xml'.")
+UNITY_DIR = r"C:\Users\matthew.corbett\AGAMOTTO\AGAMOTTO\AGAMOTTO Simulation\Assets\StreamingAssets"
+#UNITY_DIR = os.path.join(os.path.dirname(__file__), "Unity_Data")  # Setting to local dir now for testing purposes
+ENT_DIR = os.path.join(UNITY_DIR, "entities")
+ROUTE_DIR = os.path.join(UNITY_DIR, "routes")
+os.makedirs(UNITY_DIR, exist_ok=True)
+os.makedirs(ENT_DIR, exist_ok=True)
+os.makedirs(ROUTE_DIR, exist_ok=True)
 
-def send_xml(conn, filepath):
-    if not os.path.exists(filepath):
-        print(f"File {filepath} not found.")
-        return
-    with open(filepath, "r", encoding="utf-8") as f:
-        xml_content = f.read()
-        conn.sendall(xml_content.encode('utf-8'))
-    print(f"XML file '{filepath}' sent.")
+def save_xml(kind, uid, xml_data):
+    """kind: 'entity' or 'route'"""
+    base = ENT_DIR if kind == "entity" else ROUTE_DIR
+    out_path = os.path.join(base, f"{uid}.xml")
+    #with open(out_path, "w", encoding="utf-8") as f:
+        #f.write(xml_data)
+    # tree = ET.ElementTree(xml_data)
+    # tree.write(f"{out_path}{uid}.xml", encoding="utf-8", xml_declaration=True)
+    ET.ElementTree(xml_data).write(out_path, encoding="utf-8", xml_declaration=True)
+    print(f"[UNITY] wrote {out_path}")
 
 def try_link_route_to_entity(route, entities):
     """Match a route to an entity if the first route point matches an entity's lat/lon up to 5 decimal places """
@@ -72,40 +80,58 @@ def start_server():
                     parsed = parse_cot(data)
 
                     # route event
-                    if parsed and parsed.get('__normalized_type__') == 'route':
-                        r = parsed['route']
-                        name = r.get('name') or parsed.get('callsign') or '(unnamed)'
-                        verts = r.get('verticies', [])
-                        print(f"[ROUTE] name={name} vertices={len(verts)}")
-                        
-                        for i, v in enumerate(verts[:5]):
-                            lat = v.get('lat'); lon = v.get('lon'); alt = v.get('alt')
-                            if alt is not None:
-                                print(f"  {i:02d}: lat={lat:.6f} lon={lon:.6f} alt={alt:.1f}")
-                            else:
-                                print(f"  {i:02d}: lat={lat:.6f} lon={lon:.6f}")
-                        if len(verts) > 5:
-                            print(f"  ... ({len(verts)-5} more)")
-
-                        linked_uid = try_link_route_to_entity(r, entities)
-                        if linked_uid:
-                            print(f"  linked-to entity uid={linked_uid}")
-                        continue
-
                     if parsed:
-                        print(parsed)
-                           
-                        # update entity cache if payload has location + uid
-                        uid = parsed.get("uid")
-                        lat = parsed.get("lat")
-                        lon = parsed.get("lon")
-                        if uid is not None and lat is not None and lon is not None:
-                            entities[uid] = {
-                                "uid": uid,
-                                "lat": lat,
-                                "lon": lon,
-                                "callsign": parsed.get("callsign")
-                            }
+
+                        if parsed.get('__normalized_type__') == 'route':
+                            print(parsed)
+                            r = parsed['route']
+                            name = r.get('name') or parsed.get('callsign') or '(unnamed)'
+                            verts = r.get('verticies', [])
+
+                            #for i, v in enumerate(verts[:5]):
+                                #lat = v.get('lat'); lon = v.get('lon'); alt = v.get('alt')
+                                #if alt is not None:
+                                #   print(f"  {i:02d}: lat={lat:.6f} lon={lon:.6f} alt={alt:.1f}")
+                                #else:
+                                # print(f"  {i:02d}: lat={lat:.6f} lon={lon:.6f}")
+
+                            #if len(verts) > 5:
+                                #print(f"  ... ({len(verts)-5} more)")
+                            raw_xml = ET.fromstring(data)
+                            route_uid = parsed.get("uid") or (r.get("name") or "route-unknown")
+
+                            linked_uid = try_link_route_to_entity(r, entities)
+                            if linked_uid:
+                                print(f"  linked-to entity uid={linked_uid}")
+
+                            #rename the route name to the associated callsign of the entity to whom the route belongs
+                            contact = raw_xml.find(".//contact")
+                            if contact is not None and linked_uid:
+                                contact.set("callsign", linked_uid)
+
+                            save_xml("route", route_uid, raw_xml)
+
+
+
+
+                        else:
+                            print(parsed)
+
+                            entity_uid = parsed.get("uid") or "entity-unknown"
+                            raw_xml = ET.fromstring(data)
+                            save_xml("entity", entity_uid, raw_xml)
+
+                            # update entity cache if payload has location + uid
+                            uid = parsed.get("uid")
+                            lat = parsed.get("lat")
+                            lon = parsed.get("lon")
+                            if uid is not None and lat is not None and lon is not None:
+                                entities[uid] = {
+                                    "uid": uid,
+                                    "lat": lat,
+                                    "lon": lon,
+                                    "callsign": parsed.get("callsign")
+                                }
                     else:
                         print("[WARN] could not parse payload")
 
