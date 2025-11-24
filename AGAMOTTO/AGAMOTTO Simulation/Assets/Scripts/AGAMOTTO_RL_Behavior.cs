@@ -3,6 +3,8 @@ using Newtonsoft.Json.Utilities;
 using Ride;
 using Ride.AI;
 using Ride.AI.RL;
+using Ride.Examples;
+using Ride.WorldState;
 using System;
 using System.Collections;
 using System.Collections.Generic;
@@ -10,6 +12,7 @@ using System.Linq;
 using System.Threading.Tasks;
 using Unity.MLAgents.Policies;
 using UnityEngine;
+using static VHWayPointNavigator;
 
 
 public class AGAMOTTO_RL_Behavior: MLBehaviour
@@ -18,6 +21,7 @@ public class AGAMOTTO_RL_Behavior: MLBehaviour
     /// The max distance of an enemy from the agent before it is disregarded
     /// </summary>
     public float maxEnemyDistance = RideUtils.Infinity;
+
     public AGAMOTTO_RL_Behavior(UnityEngine.GameObject behaviourSettings, float maxEnemyDistance) : base(behaviourSettings)
     {
         this.maxEnemyDistance = maxEnemyDistance;

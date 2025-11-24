@@ -1,3 +1,4 @@
+using EtcAbduction;
 using Google.Protobuf.WellKnownTypes;
 using Ride;
 using Ride.AI;
@@ -10,6 +11,7 @@ using Unity.MLAgents.Actuators;
 using Unity.MLAgents.Sensors;
 using UnityEngine;
 using UnityEngine.InputSystem;
+using UnityEngine.UIElements;
 
 #if RIDE_ML_AGENTS
 public class AGAMOTTO_ATD_Agent : RLAgent
@@ -19,15 +21,28 @@ public class AGAMOTTO_ATD_Agent : RLAgent
     public RideVector3 m_startingPosition;
     public RideVector3 m_enemyStartingPosition;
     private Vector3 previousPosition;
+    private int episodeCounter = 0;
     public override void OnEpisodeBegin()
     {
-        
+        episodeCounter++;
+        Debug.Log($"Episode {episodeCounter}...");
+        IAgentSystem agentSystem = Globals.api.agentSystem;
+        IMovementSystem movementSystem = Globals.api.movementSystem;
+
         base.OnEpisodeBegin();
-        api.movementSystem.MoveTeleport(agent, m_startingPosition);
-        if (api != null)
+
+
+        //api.agentSystem.SetAgentState(agent, StateMachineUtils.IdleState);
+        movementSystem.MoveTeleport(agent, m_startingPosition);
+
+        if (agentSystem.IsAgentDead(agent))
         {
-            api.agentSystem.SetAgentState(agent, StateMachineUtils.MoveState);
+            Debug.Log($"Episode reset and agent dead at step: {stepCount}");
+            agentSystem.ReviveAgent(agent);
         }
+
+
+
     }
 
     public override void CollectObservations(VectorSensor sensor)
@@ -51,15 +66,15 @@ public class AGAMOTTO_ATD_Agent : RLAgent
         //sensor.AddObservation(m_goal.transform.position.z);
 
         //where agent is facing
-        sensor.AddObservation(transform.forward);
+        //sensor.AddObservation(transform.forward);
 
     }
     private void OnCollisionEnter(Collision collision)
     {
 
-        AddReward(-1.0f); // Penalty for hitting obstacle
+        //AddReward(-1.0f); // Penalty for hitting obstacle
         Debug.Log("Obstacle!");
-        DispatchTrainingResult(false);
+        //DispatchTrainingResult(false);
         //EndEpisode();
 
     }
@@ -67,25 +82,6 @@ public class AGAMOTTO_ATD_Agent : RLAgent
     {
         IAgentSystem agentSystem = Globals.api.agentSystem;
         IMovementSystem movementSystem = Globals.api.movementSystem;
-
-        var dirToGo = Vector3.zero;
-        var rotateDir = RideVector3.zero;
-
-        float dirToGoDegrees = Mathf.Clamp(actions.ContinuousActions[0], -1f, 1f);
-
-        float angleRadians = dirToGoDegrees * Mathf.Deg2Rad;
-
-        Vector3 direction = new Vector3(Mathf.Cos(angleRadians), 0, Mathf.Sin(angleRadians));
-
-        Vector3 newPos = agentTransform.position + (direction.normalized * api.movementSystem.GetMoverSpeed(agent));
-
-        if (api.movementSystem.IsPathValid(agentTransform.position, new RideVector3(newPos)))
-        {
-            api.movementSystem.MoveToPosition(agent, new RideVector3(newPos));
-            //api.movementSystem.MoveToPositionInFormation(agent, new RideVector3(newPos), FormationProcedureType.Wedge);
-        }
-
-    agentSystem.SetAgentState(agent, StateMachineUtils.MoveState);
 
         if (agentSystem.IsAgentDead(m_enemy))
         {
@@ -101,38 +97,51 @@ public class AGAMOTTO_ATD_Agent : RLAgent
             EndEpisode();
         }
 
-        else if (stepCount >= MaxStep)
+        float xmov = actions.ContinuousActions[0];
+        float zmov = actions.ContinuousActions[1];
+
+        RideVector3 newPos;
+
+        Vector3 direction = new Vector3(xmov, 0, zmov).normalized;
+
+        float speed = 1f;
+        float deltaTime = Time.deltaTime;
+
+        newPos = agentTransform.position + direction * speed * deltaTime;
+
+        if (api.movementSystem.IsPathValid(agentTransform.position, new RideVector3(newPos)))
         {
-            //AddReward(-1);
-            DispatchTrainingResult(false);
-            //EndEpisode();
+            //var blueTeam = Globals.api.scenarioSystem.GetAgents(Team.Blue);
+            var maxSpeed = Globals.api.agentSystem.GetAgentMaxSpeed(agent);
+            //var agentTeam = Globals.api.agentSystem.GetAgentTeam(agent);
+            //Debug.Log("Invalid path");
+            api.movementSystem.MoveTeleport(agent, new RideVector3(newPos));
+            var agentTacticalGroup = Globals.api.groupSystem.GetGroupMemberships(agent);
+            //api.movementSystem.MoveToPosition(agentTacticalGroup, new RideVector3(newPos), FormationProcedureType.Wedge);
+            //api.movementSystem.MoveToPosition(agent, new RideVector3(newPos), 5f);
+            //api.movementSystem.MoveToPositionInFormation(agent, new RideVector3(newPos), FormationProcedureType.Wedge);
         }
+
         RideVector3 enemyPos = api.GetSystem<ITransformSystem>().GetPosition(m_enemy);
         float enemyDist = Vector3.Distance(agentTransform.position, enemyPos);
-        //float originalEnemyDistance = Vector3.Distance(m_enemyStartingPosition, enemyPos);
 
         float previousDistance = Vector3.Distance(previousPosition, enemyPos);
-        float currentDistance = Vector3.Distance(transform.position, enemyPos);
-
-        //AddReward(enemyDist - originalEnemyDistance + (-1f / MaxStep));
 
 
-        float progressReward = previousDistance - enemyDist;
+        if (enemyDist < previousDistance)
+            AddReward(+0.05f);
+        else
+            AddReward(-0.02f);
 
-        AddReward(progressReward * 1f); // Scale as needed
-
-        // 2. Small reward for moving (to discourage standing still)
-        float movement = Vector3.Distance(transform.position, previousPosition);
-        AddReward(movement * 1f);
-
-        // 3. Penalty for moving away from the enemy
-        if (progressReward < 0)
+        if(stepCount > MaxStep)
         {
-            AddReward(progressReward * 0.5f); // Negative reward
+            DispatchTrainingResult(false);
+            Debug.Log($"Episode reset at step: {stepCount}");
+            EndEpisode();
         }
 
-        previousPosition = transform.position;
-        //AddReward(-1f / MaxStep);
+        previousPosition = agentTransform.position;
+
     }
 
     public override void Heuristic(in ActionBuffers actionsOut)
