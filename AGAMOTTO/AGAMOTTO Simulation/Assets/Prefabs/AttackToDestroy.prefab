@@ -17,7 +17,7 @@ GameObject:
   - component: {fileID: 8710029262310393097}
   - component: {fileID: -6179011931364519791}
   m_Layer: 0
-  m_Name: AttackToDestroyMLSettings
+  m_Name: AttackToDestroy
   m_TagString: Untagged
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0

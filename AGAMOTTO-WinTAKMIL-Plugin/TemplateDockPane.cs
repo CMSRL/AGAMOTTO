@@ -15,6 +15,8 @@ using System.Windows.Forms;
 
 namespace AGAMOTTO_WinTAK_Plugin
 {
+
+
     [WinTak.Framework.Docking.Attributes.DockPane(ID, "AGAMOTTO WinTAK Plugin", Content = typeof(TemplateView))]
     internal class TemplateDockPane : WinTak.Framework.Docking.DockPane
     {
@@ -36,6 +38,10 @@ namespace AGAMOTTO_WinTAK_Plugin
         public ObservableCollection<string> LogLines { get; } = new ObservableCollection<string>();
         public ObservableCollection<string> AssessmentLines { get; } = new ObservableCollection<string>();
 
+        public ObservableCollection<string> MissionModes { get; } =
+            new ObservableCollection<string> { "Attack to Destroy", "Retain to Defeat", "Example3" };
+
+
         public ICommand SendMapDataCommand { get; private set; }
         public ICommand TestConnectionCommand { get; private set; }
 
@@ -52,8 +58,15 @@ namespace AGAMOTTO_WinTAK_Plugin
 
         public ICommand ChooseFolderCommand { get; private set; }
         public ICommand SaveToFolderCommand { get; private set; }
-        public ICommand SetVisualizationModeCommand { get; private set; }
+        public ICommand SetEvaluationModeCommand { get; private set; }
         public ICommand SetTrainingModeCommand { get; private set; }
+
+        public ICommand SetHybridModeCommand { get; private set; }
+
+        public ICommand SetATDModeCommand { get; private set; }
+
+        public ICommand SetRTDModeCommand { get; private set; }
+
 
         [ImportingConstructor]
         public TemplateDockPane(IMapObjectItemManager mapObjectItemManager)
@@ -77,13 +90,25 @@ namespace AGAMOTTO_WinTAK_Plugin
             saveFolderCmd.Executed += OnSaveToFolderExecuted;
             SaveToFolderCommand = saveFolderCmd;
 
-            var setVisCmd = new ExecutedCommand();
-            setVisCmd.Executed += (_, __) => { _orchestrator.CurrentMode = AGAMOTTO.WinTAKMIL.DispatchMode.Visualization; LogLines.Add($"[{DateTime.Now:T}] Mode set: visualization"); };
-            SetVisualizationModeCommand = setVisCmd;
+            var setEvalCmd = new ExecutedCommand();
+            setEvalCmd.Executed += (_, __) => { _orchestrator.CurrentMode = AGAMOTTO.WinTAKMIL.DispatchMode.Evaluation; LogLines.Add($"[{DateTime.Now:T}] Mode set: evaluation"); };
+            SetEvaluationModeCommand = setEvalCmd;
             
             var setTrainCmd = new ExecutedCommand();
             setTrainCmd.Executed += (_, __) => { _orchestrator.CurrentMode = AGAMOTTO.WinTAKMIL.DispatchMode.Training; LogLines.Add($"[{DateTime.Now:T}] Mode set: training"); };
             SetTrainingModeCommand = setTrainCmd;
+
+            var setHybridCmd = new ExecutedCommand();
+            setHybridCmd.Executed += (_, __) => { _orchestrator.CurrentMode = AGAMOTTO.WinTAKMIL.DispatchMode.Hybrid; LogLines.Add($"[{DateTime.Now:T}] Mode set: hybrid"); };
+            SetHybridModeCommand = setHybridCmd;
+
+            var setATDCmd = new ExecutedCommand();
+            setATDCmd.Executed += (_, __) => { _orchestrator.CurrentMission = "Attack to Destroy"; LogLines.Add($"[{DateTime.Now:T}] Mission set: {_orchestrator.CurrentMission}"); };
+            SetATDModeCommand = setATDCmd;
+
+            var setRTDCmd = new ExecutedCommand();
+            setRTDCmd.Executed += (_, __) => { _orchestrator.CurrentMission = "Retain to Defeat"; LogLines.Add($"[{DateTime.Now:T}] Mission set: {_orchestrator.CurrentMission}"); };
+            SetRTDModeCommand = setRTDCmd;
 
             RefreshCounts(); 
             StartResultsListener();
@@ -192,7 +217,7 @@ namespace AGAMOTTO_WinTAK_Plugin
         {
             RefreshCounts();
             var success = _orchestrator.SendCurrentSituation(_mapObjectItemManager, IpAddress);
-            var mode = _orchestrator.CurrentMode == AGAMOTTO.WinTAKMIL.DispatchMode.Training ? "training" : "visualization";
+            var mode = _orchestrator.CurrentMode;// == AGAMOTTO.WinTAKMIL.DispatchMode.Training ? "training" : "visualization";
             LogLines.Add($"[{DateTime.Now:T}] Send Map Data ({mode}) -> {(success ? "Sent" : "No items")}");
             RefreshCounts();
         }
@@ -372,7 +397,7 @@ namespace AGAMOTTO_WinTAK_Plugin
             try
             {
                 var ok = _orchestrator.SaveCurrentSituationToFolder(_mapObjectItemManager, OutputFolder);
-                var mode = _orchestrator.CurrentMode == AGAMOTTO.WinTAKMIL.DispatchMode.Training ? "training" : "visualization";
+                var mode = _orchestrator.CurrentMode;// == AGAMOTTO.WinTAKMIL.DispatchMode.Training ? "training" : "visualization";
                 LogLines.Add($"[{DateTime.Now:T}] Save to folder ({mode}) -> {(ok ? "Saved" : "No items")}");
                 RefreshCounts();
             }
@@ -381,5 +406,6 @@ namespace AGAMOTTO_WinTAK_Plugin
                 LogLines.Add($"[{DateTime.Now:T}] Save failed: {ex.Message}");
             }
         }
+
     }
 }
