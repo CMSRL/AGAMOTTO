@@ -108,7 +108,7 @@ namespace AGAMOTTO
                 File.WriteAllText(outputPath, json);
 
                 Debug.Log($"[ExportData] Wrote status to: {Path.GetFullPath(outputPath)}");
-                Debug.Log($"[ExportData] Payload:\n{json}");
+                //Debug.Log($"[ExportData] Payload:\n{json}");
             }
 
             [System.Serializable]
@@ -184,6 +184,9 @@ namespace AGAMOTTO
             OnGUILoadTerrainSplitLmab();
         }
 
+        /// <summary>
+        /// The heart of the scenario generator. Received a parsed Cot Message, creates units as shown in the CoT (if CoT is for a unit), and begins applicable scenario run based on AGAMOTTO dispatch mode
+        /// </summary>
         private void ParseCotAndCreateEntity(XmlDocument doc)
         {
             try
@@ -208,18 +211,28 @@ namespace AGAMOTTO
 
                     UnityMainThreadDispatcher.Instance().Enqueue(() =>
                     {
-                        if (mode.Equals("training"))
+                        if (mode.Equals("Training"))
                         {
-                            Debug.Log("Begining scenario creation in training mode");
+                            Debug.Log($"Received a CoT Message in RL Training Mode");
+                            //'a' is atomic, meaning it is a physical thin, like a unit
                             if (type != null && type.StartsWith("a"))
                             {
+                                string[] segments = type.Split('-');
+                                Debug.Log($"Creating {type} Unit at Lat:{lat}, Lon:{lon}");
                                 RideID unitCreated = CreateUnit(type, uid, double.Parse(lat), double.Parse(lon));
-                                bool trainingStarted = StartRLTraining(unitCreated);
+                                //if friendly, begin training using desired mission and reward type
+                                if (segments[1].StartsWith('f'))
+                                {
+                                    Debug.Log("Beginning RL Training for Friendly Unit");
+                                    bool trainingStarted = StartRLTraining(unitCreated);
+                                }
+                                
                             }
 
                         }
-                        else if (mode.Equals("visualization"))
+                        else if (mode.Equals("Evaluation"))
                         {
+                            Debug.Log($"Received a CoT Message in Evaluation Mode - Creating entity {type}");
                             if (type != null && type.StartsWith("a"))
                             {
                                 RideID unitCreated = CreateUnit(type, uid, double.Parse(lat), double.Parse(lon));
@@ -227,8 +240,7 @@ namespace AGAMOTTO
 
                             if (type != null && type.EndsWith("r"))
                             {
-                                //Debug.Log("Received a route");
-                                //Debug.Log(type);
+                                //If CoT message is a route, create route in RIDE, and associate with the applicable entity
                                 XmlNode routeNode = root.SelectSingleNode("detail/route");
 
                                 int routeSize = 0;
@@ -258,8 +270,9 @@ namespace AGAMOTTO
                                 
                             }
                         }
-                        else if (mode.Equals("hybrid"))
+                        else if (mode.Equals("Hybrid"))
                         {
+                            Debug.Log($"Received a CoT Message in Hybrid Mode - Creating entity {type}");
                             if (type != null && type.StartsWith("a"))
                             {
                                 RideID unitCreated = CreateUnit(type, uid, double.Parse(lat), double.Parse(lon));
@@ -433,7 +446,7 @@ namespace AGAMOTTO
 
         }
 
-        bool StartRLTraining(RideID tacticalGroup)
+        bool StartRLTraining(RideID tacticalGroup, string mission = "AttackToDestroy")
         {
             RideID squadLeaderId = Globals.api.groupSystem.GetGroupLeader(tacticalGroup);
             IEnumerable<RideID> groupAgents = Globals.api.scenarioSystem.GetAgents(Ride.Team.Blue);
@@ -441,8 +454,9 @@ namespace AGAMOTTO
             var goSystem = Globals.api.GetSystem<IGameObjectSystem>();
 
             //collect settings specific to ATD, which includes custom ATD agent
-            GameObject settings = m_settingsPrefabGameObjects.FirstOrDefault(obj => obj.name == "AttackToDestroyMLSettings");
-            AGAMOTTO_RL_Behavior RLBehavior = new AGAMOTTO_RL_Behavior(settings, RideUtils.Infinity);
+            Debug.Log($"Beginning RL Training for RIDE Unit {tacticalGroup.id} with Mission: {mission}");
+            GameObject missionSettings = m_settingsPrefabGameObjects.FirstOrDefault(obj => obj.name == mission);
+            AGAMOTTO_RL_Behavior RLBehavior = new AGAMOTTO_RL_Behavior(missionSettings, RideUtils.Infinity);
 
             //Sets only the SL as the learning agent, and the SL moves the squad.
             //Globals.api.agentSystem.SetAgentBehaviour(squadLeaderId, RLBehavior);

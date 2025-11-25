@@ -167,6 +167,7 @@
             </StackPanel>
         </Border>
 
+        
         <!-- Configuration -->
         <Border Grid.Row="1" Style="{StaticResource CardStyle}" Grid.ColumnSpan="2">
             <StackPanel>
@@ -175,18 +176,43 @@
                 <!-- Mode -->
                 <StackPanel Orientation="Horizontal" Margin="0,6,0,0">
                     <TextBlock Text="Mode:" Style="{StaticResource LabelText}" Margin="0,0,12,0"/>
-                    <RadioButton Content="Visualization"
+                    <RadioButton Content="Evaluation"
                      GroupName="Mode"
                      IsChecked="True"
-                     Command="{Binding SetVisualizationModeCommand}"
+                     Command="{Binding SetEvaluationModeCommand}"
                      Margin="0,0,16,0"
                      Style="{StaticResource DarkRadio}"/>
 
                     <RadioButton Content="Training"
                      GroupName="Mode"
                      Command="{Binding SetTrainingModeCommand}"
+                                 Margin="0,0,16,0"
+                     Style="{StaticResource DarkRadio}"/>
+
+                    <RadioButton Content="Hybrid"
+                     GroupName="Mode"
+                     Command="{Binding SetHybridModeCommand}"
                      Style="{StaticResource DarkRadio}"/>
                 </StackPanel>
+
+                <!-- Mission -->
+                <StackPanel Orientation="Horizontal" Margin="0,10,0,0">
+                    <TextBlock Text="Mission:" Style="{StaticResource LabelText}" Margin="0,0,12,0"/>
+                    <RadioButton Content="Attack To Destroy"
+                     GroupName="Mission"
+                     IsChecked="True"
+                     Command="{Binding SetATDModeCommand}"
+                     Margin="0,0,16,0"
+                     Style="{StaticResource DarkRadio}"/>
+
+                    <RadioButton Content="Retain to Defeat"
+                     GroupName="Mission"
+                     Command="{Binding SetRTDModeCommand}"
+                                 Margin="0,0,16,0"
+                     Style="{StaticResource DarkRadio}"/>
+
+                </StackPanel>
+
             </StackPanel>
         </Border>
 

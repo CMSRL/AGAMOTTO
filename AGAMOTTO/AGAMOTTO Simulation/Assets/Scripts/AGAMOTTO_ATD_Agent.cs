@@ -104,19 +104,20 @@ public class AGAMOTTO_ATD_Agent : RLAgent
 
         Vector3 direction = new Vector3(xmov, 0, zmov).normalized;
 
-        float speed = 1f;
+        var maxSpeed = Globals.api.agentSystem.GetAgentMaxSpeed(agent);
         float deltaTime = Time.deltaTime;
 
-        newPos = agentTransform.position + direction * speed * deltaTime;
+        newPos = agentTransform.position + direction * maxSpeed;// * deltaTime;
+        agentTransform.rotation = Quaternion.LookRotation(direction);
 
         if (api.movementSystem.IsPathValid(agentTransform.position, new RideVector3(newPos)))
         {
             //var blueTeam = Globals.api.scenarioSystem.GetAgents(Team.Blue);
-            var maxSpeed = Globals.api.agentSystem.GetAgentMaxSpeed(agent);
+            
             //var agentTeam = Globals.api.agentSystem.GetAgentTeam(agent);
             //Debug.Log("Invalid path");
             api.movementSystem.MoveTeleport(agent, new RideVector3(newPos));
-            var agentTacticalGroup = Globals.api.groupSystem.GetGroupMemberships(agent);
+            //var agentTacticalGroup = Globals.api.groupSystem.GetGroupMemberships(agent);
             //api.movementSystem.MoveToPosition(agentTacticalGroup, new RideVector3(newPos), FormationProcedureType.Wedge);
             //api.movementSystem.MoveToPosition(agent, new RideVector3(newPos), 5f);
             //api.movementSystem.MoveToPositionInFormation(agent, new RideVector3(newPos), FormationProcedureType.Wedge);

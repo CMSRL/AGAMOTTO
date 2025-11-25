@@ -185,16 +185,15 @@ async def main():
     scene_path = r"Assets\Scenes\BaseScene.unity"
     terrain_reporting_path = r"C:\Users\matthew.corbett\AGAMOTTO\AGAMOTTO\AGAMOTTO Simulation\Assets\status.json"
     terrain_status = ""
-    thread = run_async_in_thread(play_unity_scene_async(unity_exe, project_path, scene_path, batchmode=False))
-    #await play_unity_scene_async(unity_exe, project_path, scene_path, batchmode=False)
+    '''thread = run_async_in_thread(play_unity_scene_async(unity_exe, project_path, scene_path, batchmode=False))
 
     while terrain_status != "Valid":
         with open(terrain_reporting_path) as f:
             data = json.load(f)
             terrain_status = data["status"]
-            #print(terrain_status)
+            #print(terrain_status)'''
 
-    print(terrain_status)
+    #print(terrain_status)
     asyncio.run(start_server())
 
 
