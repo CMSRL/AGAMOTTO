@@ -12,6 +12,7 @@ using WinTak.Overlays.Services;
 using WinTak.Overlays.ViewModels;
 using AGAMOTTO.WinTAKMIL;
 using System.Windows.Forms;
+using System.Windows.Threading;
 
 namespace AGAMOTTO_WinTAK_Plugin
 {
@@ -212,14 +213,51 @@ namespace AGAMOTTO_WinTAK_Plugin
             RefreshCounts();
         }
 
-        // Send Map Data
+        // Send Map Data (async TCP so WinTAK UI thread is not blocked on connect/send)
         private void OnSendMapDataCommandExecuted(object sender, EventArgs e)
         {
+            _ = SendMapDataAsync();
+        }
+
+        private async Task SendMapDataAsync()
+        {
             RefreshCounts();
-            var success = _orchestrator.SendCurrentSituation(_mapObjectItemManager, IpAddress);
-            var mode = _orchestrator.CurrentMode;// == AGAMOTTO.WinTAKMIL.DispatchMode.Training ? "training" : "visualization";
-            LogLines.Add($"[{DateTime.Now:T}] Send Map Data ({mode}) -> {(success ? "Sent" : "No items")}");
-            RefreshCounts();
+
+            if (!int.TryParse(Port?.Trim(), out int portParsed) || portParsed < 1 || portParsed > 65535)
+            {
+                PostToUi(() => LogLines.Add($"[{DateTime.Now:T}] Invalid port; enter 1–65535."));
+                return;
+            }
+
+            string host = string.IsNullOrWhiteSpace(IpAddress) ? "127.0.0.1" : IpAddress.Trim();
+            PostToUi(() => LogLines.Add($"[{DateTime.Now:T}] Sending map data to {host}:{portParsed}…"));
+
+            var (ok, err) = await _orchestrator.SendCurrentSituationAsync(_mapObjectItemManager, host, portParsed).ConfigureAwait(false);
+            var mode = _orchestrator.CurrentMode;
+
+            PostToUi(() =>
+            {
+                if (ok)
+                    LogLines.Add($"[{DateTime.Now:T}] Send Map Data ({mode}) -> Sent");
+                else
+                    LogLines.Add($"[{DateTime.Now:T}] Send Map Data ({mode}) -> Failed: {err ?? "unknown error"}");
+                RefreshCounts();
+            });
+        }
+
+        void PostToUi(Action action)
+        {
+            var d = System.Windows.Application.Current?.Dispatcher;
+            if (d == null)
+            {
+                action();
+                return;
+            }
+
+            if (d.CheckAccess())
+                action();
+            else
+                d.BeginInvoke(DispatcherPriority.Normal, action);
         }
 
         // Counts (entities & routes)
@@ -283,7 +321,21 @@ namespace AGAMOTTO_WinTAK_Plugin
                         try
                         {
                             client = await _resultsListener.AcceptTcpClientAsync().ConfigureAwait(false);
-                            _ = Task.Run(() => HandleResultClient(client, token), token);
+                            _ = Task.Run(async () =>
+                            {
+                                try
+                                {
+                                    await HandleResultClient(client, token).ConfigureAwait(false);
+                                }
+                                catch (OperationCanceledException)
+                                {
+                                    /* shutting down */
+                                }
+                                catch (Exception ex)
+                                {
+                                    AppendAssessment($"client error: {ex.Message}");
+                                }
+                            }, token);
                         }
                         catch (ObjectDisposedException) { /* stopping */ }
                         catch (Exception ex)
@@ -308,19 +360,33 @@ namespace AGAMOTTO_WinTAK_Plugin
                 var lenBuf = new byte[4];
                 while (!token.IsCancellationRequested)
                 {
-                    int r = await stream.ReadAsync(lenBuf, 0, 4, token).ConfigureAwait(false);
-                    if (r == 0) break;
-                    if (r < 4) throw new System.IO.IOException("short header");
+                    int headerRead = 0;
+                    while (headerRead < 4)
+                    {
+                        int r = await stream.ReadAsync(lenBuf, headerRead, 4 - headerRead, token).ConfigureAwait(false);
+                        if (r == 0)
+                            return;
+                        headerRead += r;
+                    }
 
                     int size = BitConverter.ToInt32(lenBuf, 0);
-                    if (size <= 0 || size > 10_000_000) throw new System.IO.IOException("bad size");
+                    if (size <= 0 || size > 10_000_000)
+                    {
+                        AppendAssessment($"invalid frame size ({size}); closing client.");
+                        return;
+                    }
 
                     var buf = new byte[size];
                     int got = 0;
                     while (got < size)
                     {
                         int chunk = await stream.ReadAsync(buf, got, size - got, token).ConfigureAwait(false);
-                        if (chunk == 0) throw new System.IO.IOException("closed mid-frame");
+                        if (chunk == 0)
+                        {
+                            AppendAssessment("connection closed mid-frame.");
+                            return;
+                        }
+
                         got += chunk;
                     }
 
