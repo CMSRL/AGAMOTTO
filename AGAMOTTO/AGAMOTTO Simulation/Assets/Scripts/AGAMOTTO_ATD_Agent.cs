@@ -22,26 +22,29 @@ public class AGAMOTTO_ATD_Agent : RLAgent
     public RideVector3 m_enemyStartingPosition;
     private Vector3 previousPosition;
     private int episodeCounter = 0;
-    
+    private const float MinMoveDirectionSqr = 1e-8f;
 
     public override void OnEpisodeBegin()
     {
+        base.OnEpisodeBegin();
+
         episodeCounter++;
         Debug.Log($"Episode {episodeCounter}...");
         IAgentSystem agentSystem = Globals.api.agentSystem;
-        //IMovementSystem movementSystem = Globals.api.movementSystem;
-        Debug.Log($"Episode reset, moving agent from {agentTransform.position} to {m_enemyStartingPosition}");
-        //movementSystem.MoveTeleport(agent, m_startingPosition);
+        IMovementSystem movementSystem = Globals.api.movementSystem;
+
+        Debug.Log($"Episode reset, moving agent from {agentTransform.position} to start; enemy to {m_enemyStartingPosition}");
         transform.localPosition = m_startingPosition;
 
         // Prevent spurious first-step distance-delta reward based on an uninitialized previousPosition.
         previousPosition = agentTransform.position;
 
-        // Reset velocity if using Rigidbody
-        //Rigidbody rb = agentTransform.GetComponent<Rigidbody>();
-        //rb.velocity = Vector3.zero;
-        //rb.angularVelocity = Vector3.zero;
-
+        Rigidbody rb = agentTransform.GetComponent<Rigidbody>();
+        if (rb != null)
+        {
+            rb.velocity = Vector3.zero;
+            rb.angularVelocity = Vector3.zero;
+        }
 
         if (agentSystem.IsAgentDead(agent))
         {
@@ -49,14 +52,10 @@ public class AGAMOTTO_ATD_Agent : RLAgent
             agentSystem.ReviveAgent(agent);
         }
 
-        //base.OnEpisodeBegin();
-
-
-        //api.agentSystem.SetAgentState(agent, StateMachineUtils.IdleState);
- 
-
-
-
+        // Reset enemy so a new episode does not begin with the enemy already dead (instant terminal success).
+        if (agentSystem.IsAgentDead(m_enemy))
+            agentSystem.ReviveAgent(m_enemy);
+        movementSystem.MoveTeleport(m_enemy, m_enemyStartingPosition);
     }
 
     public override void CollectObservations(VectorSensor sensor)
@@ -72,8 +71,14 @@ public class AGAMOTTO_ATD_Agent : RLAgent
         sensor.AddObservation(enemyPos.x);
         sensor.AddObservation(enemyPos.z);
 
-        // direction to enemy
-        Vector3 direction = (agentTransform.position - enemyPos).normalized;
+        // Unit direction from agent toward enemy (in world XZ plane for stability on terrain).
+        Vector3 agentPos = agentTransform.position;
+        Vector3 enemyWorld = new Vector3(enemyPos.x, enemyPos.y, enemyPos.z);
+        Vector3 toEnemy = enemyWorld - agentPos;
+        toEnemy.y = 0f;
+        if (toEnemy.sqrMagnitude < MinMoveDirectionSqr)
+            toEnemy = Vector3.forward;
+        Vector3 direction = toEnemy.normalized;
         sensor.AddObservation(direction.x);
         sensor.AddObservation(direction.y);
         sensor.AddObservation(direction.z);
@@ -85,17 +90,13 @@ public class AGAMOTTO_ATD_Agent : RLAgent
     }
     private void OnCollisionEnter(Collision collision)
     {
-
-        //AddReward(-1.0f); // Penalty for hitting obstacle
         Debug.Log("Obstacle!");
-        //DispatchTrainingResult(false);
-        //EndEpisode();
-
+        // Light penalty so the policy learns to avoid clutter in large environments without ending every bump.
+        AddReward(-0.002f);
     }
     protected override void TakeAction(ActionBuffers actions)
     {
         IAgentSystem agentSystem = Globals.api.agentSystem;
-        IMovementSystem movementSystem = Globals.api.movementSystem;
 
         if (agentSystem.IsAgentDead(m_enemy))
         {
@@ -114,27 +115,25 @@ public class AGAMOTTO_ATD_Agent : RLAgent
         float xmov = actions.ContinuousActions[0];
         float zmov = actions.ContinuousActions[1];
 
-        RideVector3 newPos;
-
-        Vector3 direction = new Vector3(xmov, 0, zmov).normalized;
-
-        var maxSpeed = Globals.api.agentSystem.GetAgentMaxSpeed(agent);
-        float deltaTime = Time.deltaTime;
-
-        newPos = agentTransform.position + direction * maxSpeed * deltaTime;
-        agentTransform.rotation = Quaternion.LookRotation(direction);
-
-        if (api.movementSystem.IsPathValid(agentTransform.position, new RideVector3(newPos)))
+        Vector3 rawMove = new Vector3(xmov, 0f, zmov);
+        if (rawMove.sqrMagnitude >= MinMoveDirectionSqr)
         {
-            var blueTeam = Globals.api.scenarioSystem.GetAgents(Team.Blue);
-            
-            //var agentTeam = Globals.api.agentSystem.GetAgentTeam(agent);
-            //Debug.Log("Invalid path");
-            api.movementSystem.MoveTeleport(agent, new RideVector3(newPos));
-            //var agentTacticalGroup = Globals.api.groupSystem.GetGroupMemberships(agent);
-            //api.movementSystem.MoveToPosition(agentTacticalGroup, new RideVector3(newPos), FormationProcedureType.Wedge);
-            //api.movementSystem.MoveToPosition(agent, new RideVector3(newPos), 5f);
-            //api.movementSystem.MoveToPositionInFormation(agent, new RideVector3(newPos), FormationProcedureType.Wedge);
+            Vector3 direction = rawMove.normalized;
+
+            var maxSpeed = Globals.api.agentSystem.GetAgentMaxSpeed(agent);
+            float deltaTime = Time.deltaTime;
+
+            Vector3 newPos = agentTransform.position + direction * maxSpeed * deltaTime;
+            agentTransform.rotation = Quaternion.LookRotation(direction);
+
+            if (api.movementSystem.IsPathValid(agentTransform.position, new RideVector3(newPos)))
+            {
+                api.movementSystem.MoveTeleport(agent, new RideVector3(newPos));
+                //var agentTacticalGroup = Globals.api.groupSystem.GetGroupMemberships(agent);
+                //api.movementSystem.MoveToPosition(agentTacticalGroup, new RideVector3(newPos), FormationProcedureType.Wedge);
+                //api.movementSystem.MoveToPosition(agent, new RideVector3(newPos), 5f);
+                //api.movementSystem.MoveToPositionInFormation(agent, new RideVector3(newPos), FormationProcedureType.Wedge);
+            }
         }
 
         RideVector3 enemyPos = api.GetSystem<ITransformSystem>().GetPosition(m_enemy);
