@@ -28,7 +28,15 @@
 *.pyc
 *.xml
 *.meta
-/AGAMOTTO-WinTAKMIL-Plugin
+# WinTAK plugin: keep sources in git; ignore build output and NuGet tree (see negations below for *.csproj / *.config)
+AGAMOTTO-WinTAKMIL-Plugin/bin/
+AGAMOTTO-WinTAKMIL-Plugin/obj/
+AGAMOTTO-WinTAKMIL-Plugin/.vs/
+AGAMOTTO-WinTAKMIL-Plugin/packages/
+AGAMOTTO-WinTAKMIL-Plugin/*.user
+!AGAMOTTO-WinTAKMIL-Plugin/AGAMOTTO WinTAK Plugin.csproj
+!AGAMOTTO-WinTAKMIL-Plugin/packages.config
+!AGAMOTTO-WinTAKMIL-Plugin/app.config
 *.cache
 *.meta
 /AGAMOTTO/AGAMOTTO Simulation/ProjectSettings
@@ -39,3 +47,4 @@ AGAMOTTO/AGAMOTTO Simulation/Assets/StreamingAssets/68814936-b813-4bdd-8d58-e973
 AGAMOTTO/AGAMOTTO Simulation/Assets/StreamingAssets/68814936-b813-4bdd-8d58-e9734d9c04d9received.xml.meta
 AGAMOTTO/AGAMOTTO Simulation/.vs/AGAMOTTO Simulation/v17/.suo
 AGAMOTTO/AGAMOTTO Simulation/.vs/AGAMOTTO Simulation/v17/.suo
+*.demo
