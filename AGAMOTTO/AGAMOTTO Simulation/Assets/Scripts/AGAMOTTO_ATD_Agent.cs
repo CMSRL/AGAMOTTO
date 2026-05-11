@@ -18,11 +18,23 @@ public class AGAMOTTO_ATD_Agent : RLAgent
 {
 
     public RideID m_enemy;
+    /// <summary>
+    /// Friendly tactical group (squad) id for <c>MoveGroupPath</c>; set from RL init.
+    /// If unset, friendly movement still uses <c>MoveGroupPath</c> with the learner <c>agent</c> id as a single-member group.
+    /// </summary>
+    public RideID m_squadTacticalGroup;
     public RideVector3 m_startingPosition;
     public RideVector3 m_enemyStartingPosition;
     private Vector3 previousPosition;
     private int episodeCounter = 0;
     private const float MinMoveDirectionSqr = 1e-8f;
+
+    public static bool IsValidRideId(RideID id) => id.id != 0 || id.version != 0;
+
+    static bool HasAssignedEnemy(RideID enemy) => IsValidRideId(enemy);
+
+    /// <summary>Ride id passed to MoveGroupPath for friendly motion.</summary>
+    RideID GetFriendlyGroupForMoveGroupPath() => IsValidRideId(m_squadTacticalGroup) ? m_squadTacticalGroup : agent;
 
     public override void OnEpisodeBegin()
     {
@@ -34,7 +46,9 @@ public class AGAMOTTO_ATD_Agent : RLAgent
         IMovementSystem movementSystem = Globals.api.movementSystem;
 
         Debug.Log($"Episode reset, moving agent from {agentTransform.position} to start; enemy to {m_enemyStartingPosition}");
-        transform.localPosition = m_startingPosition;
+
+        // Friendly motion always uses MoveGroupPath (squad id from RL init, or the learner agent as a single-member group).
+        movementSystem.MoveGroupPath(GetFriendlyGroupForMoveGroupPath(), new RideVector3[] { m_startingPosition }, FormationProcedureType.Wedge);
 
         // Prevent spurious first-step distance-delta reward based on an uninitialized previousPosition.
         previousPosition = agentTransform.position;
@@ -53,9 +67,14 @@ public class AGAMOTTO_ATD_Agent : RLAgent
         }
 
         // Reset enemy so a new episode does not begin with the enemy already dead (instant terminal success).
-        if (agentSystem.IsAgentDead(m_enemy))
-            agentSystem.ReviveAgent(m_enemy);
-        movementSystem.MoveTeleport(m_enemy, m_enemyStartingPosition);
+        if (HasAssignedEnemy(m_enemy))
+        {
+            if (agentSystem.IsAgentDead(m_enemy))
+                agentSystem.ReviveAgent(m_enemy);
+            movementSystem.MoveTeleport(m_enemy, m_enemyStartingPosition);
+        }
+        else
+            Debug.LogWarning("AGAMOTTO_ATD_Agent: m_enemy is not assigned; skipping enemy reset.");
     }
 
     public override void CollectObservations(VectorSensor sensor)
@@ -66,13 +85,18 @@ public class AGAMOTTO_ATD_Agent : RLAgent
         sensor.AddObservation(agentTransform.position.x);
         sensor.AddObservation(agentTransform.position.z);
 
+        Vector3 agentPos = agentTransform.position;
+        RideVector3 enemyPos;
+        if (HasAssignedEnemy(m_enemy))
+            enemyPos = api.GetSystem<ITransformSystem>().GetPosition(m_enemy);
+        else
+            enemyPos = new RideVector3(agentPos.x, agentPos.y, agentPos.z);
+
         // enemy x and z
-        RideVector3 enemyPos = api.GetSystem<ITransformSystem>().GetPosition(m_enemy);
         sensor.AddObservation(enemyPos.x);
         sensor.AddObservation(enemyPos.z);
 
         // Unit direction from agent toward enemy (in world XZ plane for stability on terrain).
-        Vector3 agentPos = agentTransform.position;
         Vector3 enemyWorld = new Vector3(enemyPos.x, enemyPos.y, enemyPos.z);
         Vector3 toEnemy = enemyWorld - agentPos;
         toEnemy.y = 0f;
@@ -98,18 +122,22 @@ public class AGAMOTTO_ATD_Agent : RLAgent
     {
         IAgentSystem agentSystem = Globals.api.agentSystem;
 
-        if (agentSystem.IsAgentDead(m_enemy))
+        if (HasAssignedEnemy(m_enemy) && agentSystem.IsAgentDead(m_enemy))
         {
             AddReward(m_successReward);
             DispatchTrainingResult(true);
+            suppressStepPunishmentThisAction = true;
             EndEpisode();
+            return;
         }
 
-        else if (agentSystem.IsAgentDead(agent))
+        if (agentSystem.IsAgentDead(agent))
         {
             AddReward(-1 * m_successReward);
             DispatchTrainingResult(false);
+            suppressStepPunishmentThisAction = true;
             EndEpisode();
+            return;
         }
 
         float xmov = actions.ContinuousActions[0];
@@ -128,13 +156,13 @@ public class AGAMOTTO_ATD_Agent : RLAgent
 
             if (api.movementSystem.IsPathValid(agentTransform.position, new RideVector3(newPos)))
             {
-                api.movementSystem.MoveTeleport(agent, new RideVector3(newPos));
-                //var agentTacticalGroup = Globals.api.groupSystem.GetGroupMemberships(agent);
-                //api.movementSystem.MoveToPosition(agentTacticalGroup, new RideVector3(newPos), FormationProcedureType.Wedge);
-                //api.movementSystem.MoveToPosition(agent, new RideVector3(newPos), 5f);
-                //api.movementSystem.MoveToPositionInFormation(agent, new RideVector3(newPos), FormationProcedureType.Wedge);
+                RideVector3 dest = new RideVector3(newPos.x, newPos.y, newPos.z);
+                api.movementSystem.MoveGroupPath(GetFriendlyGroupForMoveGroupPath(), new RideVector3[] { dest }, FormationProcedureType.Wedge);
             }
         }
+
+        if (!HasAssignedEnemy(m_enemy))
+            return;
 
         RideVector3 enemyPos = api.GetSystem<ITransformSystem>().GetPosition(m_enemy);
         float enemyDist = Vector3.Distance(agentTransform.position, enemyPos);
@@ -152,7 +180,9 @@ public class AGAMOTTO_ATD_Agent : RLAgent
         {
             DispatchTrainingResult(false);
             Debug.Log($"Episode reset at step: {stepCount}");
+            suppressStepPunishmentThisAction = true;
             EndEpisode();
+            return;
         }
 
         previousPosition = agentTransform.position;
