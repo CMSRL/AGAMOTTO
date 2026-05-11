@@ -25,9 +25,7 @@ public class AGAMOTTO_RL_Behavior : MLBehaviour
     /// </summary>
     public int enemySpawnWaitMaxPolls = 300;
 
-    /// <summary>
-    /// Friendly squad / tactical group id: movement uses <c>MoveGroupPath</c> so the wedge moves as one unit.
-    /// </summary>
+    /// <summary>Friendly squad / tactical group id (passed to the ATD agent for future group logic).</summary>
     readonly RideID _friendlyTacticalGroup;
 
     public AGAMOTTO_RL_Behavior(UnityEngine.GameObject behaviourSettings, float maxEnemyDistance, RideID friendlyTacticalGroup = default)
@@ -43,6 +41,8 @@ public class AGAMOTTO_RL_Behavior : MLBehaviour
         {
             base.InitMLBehaviour();
             AGAMOTTO_ATD_Agent mlagent = GetRLAgent<AGAMOTTO_ATD_Agent>();
+            // Ensure RIDE id + Unity transform track the behaviour entity (squad leader), not the mission prefab root.
+            mlagent.Init(api, entity);
             mlagent.gameObject.GetComponent<BehaviorParameters>().BehaviorName = "AGAMOTTO_RL";
             mlagent.m_squadTacticalGroup = _friendlyTacticalGroup;
 
@@ -53,8 +53,8 @@ public class AGAMOTTO_RL_Behavior : MLBehaviour
                 return;
             }
 
-            // Snapshot start pose after the world has had time to place units.
-            mlagent.m_startingPosition = mlagent.gameObject.transform.position;
+            // Snapshot start pose from sim (leader entity), not the mission prefab transform.
+            mlagent.m_startingPosition = api.GetSystem<ITransformSystem>().GetPosition(entity);
 
             Team team = api.agentSystem.GetAgentTeam(entity) == Team.Blue ? Team.Red : Team.Blue;
             IEnumerable<RideID> enemies = api.scenarioSystem.GetAgents(mlagent.agentTransform.position, maxEnemyDistance, team);

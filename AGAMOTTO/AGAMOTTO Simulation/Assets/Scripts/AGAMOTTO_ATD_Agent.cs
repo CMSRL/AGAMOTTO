@@ -18,23 +18,79 @@ public class AGAMOTTO_ATD_Agent : RLAgent
 {
 
     public RideID m_enemy;
-    /// <summary>
-    /// Friendly tactical group (squad) id for <c>MoveGroupPath</c>; set from RL init.
-    /// If unset, friendly movement still uses <c>MoveGroupPath</c> with the learner <c>agent</c> id as a single-member group.
-    /// </summary>
+    /// <summary>Friendly tactical group id from RL init (reserved for group-level APIs).</summary>
     public RideID m_squadTacticalGroup;
     public RideVector3 m_startingPosition;
     public RideVector3 m_enemyStartingPosition;
     private Vector3 previousPosition;
     private int episodeCounter = 0;
     private const float MinMoveDirectionSqr = 1e-8f;
+    /// <summary>Minimum leader step (meters) per RL decision when using teleport motion.</summary>
+    const float MinMoveStepMeters = 0.15f;
+    /// <summary>Floor for decision delta so <c>maxSpeed * dt</c> is not zero in batched / headless steps.</summary>
+    const float MinDecisionDeltaSeconds = 1f / 20f;
 
     public static bool IsValidRideId(RideID id) => id.id != 0 || id.version != 0;
 
     static bool HasAssignedEnemy(RideID enemy) => IsValidRideId(enemy);
 
-    /// <summary>Ride id passed to MoveGroupPath for friendly motion.</summary>
-    RideID GetFriendlyGroupForMoveGroupPath() => IsValidRideId(m_squadTacticalGroup) ? m_squadTacticalGroup : agent;
+    /// <summary>Max horizontal distance from leader for a Blue agent to count as part of this squad when teleporting.</summary>
+    const float SquadTeleportMaxHorizontalMeters = 50f;
+
+    /// <summary>
+    /// Teleports the squad leader to <paramref name="leaderDestination"/> and applies the same world delta to nearby
+    /// friendly (Blue) agents so the wedge stays coherent. Uses <c>MoveTeleport</c> only (no <c>MoveGroupPath</c>).
+    /// </summary>
+    void TeleportFriendlySquadPreservingFormation(RideVector3 leaderDestination)
+    {
+        ITransformSystem transformSystem = api.GetSystem<ITransformSystem>();
+        IMovementSystem movementSystem = api.movementSystem;
+        IAgentSystem agentSystem = Globals.api.agentSystem;
+
+        RideVector3 leaderFrom = transformSystem.GetPosition(agent);
+        double dx = leaderDestination.x - leaderFrom.x;
+        double dy = leaderDestination.y - leaderFrom.y;
+        double dz = leaderDestination.z - leaderFrom.z;
+
+        float maxSq = SquadTeleportMaxHorizontalMeters * SquadTeleportMaxHorizontalMeters;
+        IEnumerable<RideID> blues = api.scenarioSystem.GetAgents(Team.Blue);
+        if (blues == null)
+        {
+            movementSystem.MoveTeleport(agent, leaderDestination);
+            return;
+        }
+
+        foreach (RideID id in blues)
+        {
+            if (!IsValidRideId(id))
+                continue;
+            if (agentSystem.IsAgentDead(id))
+                continue;
+
+            RideVector3 p = transformSystem.GetPosition(id);
+            bool isLeader = id.id == agent.id && id.version == agent.version;
+            if (!isLeader)
+            {
+                float hdx = (float)(p.x - leaderFrom.x);
+                float hdz = (float)(p.z - leaderFrom.z);
+                if (hdx * hdx + hdz * hdz > maxSq)
+                    continue;
+            }
+
+            RideVector3 dest = new RideVector3(
+                (float)(p.x + dx),
+                (float)(p.y + dy),
+                (float)(p.z + dz));
+            movementSystem.MoveTeleport(id, dest);
+        }
+    }
+
+    /// <summary>Leader world position from RIDE sim state (Unity transform can lag).</summary>
+    Vector3 GetAgentWorldPosition()
+    {
+        RideVector3 p = api.GetSystem<ITransformSystem>().GetPosition(agent);
+        return new Vector3((float)p.x, (float)p.y, (float)p.z);
+    }
 
     public override void OnEpisodeBegin()
     {
@@ -47,11 +103,10 @@ public class AGAMOTTO_ATD_Agent : RLAgent
 
         Debug.Log($"Episode reset, moving agent from {agentTransform.position} to start; enemy to {m_enemyStartingPosition}");
 
-        // Friendly motion always uses MoveGroupPath (squad id from RL init, or the learner agent as a single-member group).
-        movementSystem.MoveGroupPath(GetFriendlyGroupForMoveGroupPath(), new RideVector3[] { m_startingPosition }, FormationProcedureType.Wedge);
+        TeleportFriendlySquadPreservingFormation(m_startingPosition);
 
-        // Prevent spurious first-step distance-delta reward based on an uninitialized previousPosition.
-        previousPosition = agentTransform.position;
+        // Align reward / obs bookkeeping with simulation pose (not the ML-Agents Unity transform).
+        previousPosition = GetAgentWorldPosition();
 
         Rigidbody rb = agentTransform.GetComponent<Rigidbody>();
         if (rb != null)
@@ -81,11 +136,11 @@ public class AGAMOTTO_ATD_Agent : RLAgent
     {
         base.CollectObservations(sensor);
 
-        // agent x and z
-        sensor.AddObservation(agentTransform.position.x);
-        sensor.AddObservation(agentTransform.position.z);
+        Vector3 agentPos = GetAgentWorldPosition();
+        // agent x and z (RIDE sim position so policy matches teleport motion state)
+        sensor.AddObservation(agentPos.x);
+        sensor.AddObservation(agentPos.z);
 
-        Vector3 agentPos = agentTransform.position;
         RideVector3 enemyPos;
         if (HasAssignedEnemy(m_enemy))
             enemyPos = api.GetSystem<ITransformSystem>().GetPosition(m_enemy);
@@ -149,25 +204,26 @@ public class AGAMOTTO_ATD_Agent : RLAgent
             Vector3 direction = rawMove.normalized;
 
             var maxSpeed = Globals.api.agentSystem.GetAgentMaxSpeed(agent);
-            float deltaTime = Time.deltaTime;
+            float deltaTime = Mathf.Max(Time.deltaTime, MinDecisionDeltaSeconds);
+            float stepDistance = Mathf.Max(maxSpeed * deltaTime, MinMoveStepMeters);
 
-            Vector3 newPos = agentTransform.position + direction * maxSpeed * deltaTime;
-            agentTransform.rotation = Quaternion.LookRotation(direction);
+            RideVector3 fromRide = api.GetSystem<ITransformSystem>().GetPosition(agent);
+            Vector3 from = new Vector3((float)fromRide.x, (float)fromRide.y, (float)fromRide.z);
+            Vector3 newPos = from + direction * stepDistance;
 
-            if (api.movementSystem.IsPathValid(agentTransform.position, new RideVector3(newPos)))
-            {
-                RideVector3 dest = new RideVector3(newPos.x, newPos.y, newPos.z);
-                api.movementSystem.MoveGroupPath(GetFriendlyGroupForMoveGroupPath(), new RideVector3[] { dest }, FormationProcedureType.Wedge);
-            }
+            RideVector3 dest = new RideVector3(newPos.x, newPos.y, newPos.z);
+            TeleportFriendlySquadPreservingFormation(dest);
         }
 
         if (!HasAssignedEnemy(m_enemy))
             return;
 
         RideVector3 enemyPos = api.GetSystem<ITransformSystem>().GetPosition(m_enemy);
-        float enemyDist = Vector3.Distance(agentTransform.position, enemyPos);
+        Vector3 agentWorld = GetAgentWorldPosition();
+        Vector3 enemyWorldV = new Vector3((float)enemyPos.x, (float)enemyPos.y, (float)enemyPos.z);
+        float enemyDist = Vector3.Distance(agentWorld, enemyWorldV);
 
-        float previousDistance = Vector3.Distance(previousPosition, enemyPos);
+        float previousDistance = Vector3.Distance(previousPosition, enemyWorldV);
 
 
         // Distance shaping should be small enough that terminal reward is still meaningful.
@@ -185,7 +241,7 @@ public class AGAMOTTO_ATD_Agent : RLAgent
             return;
         }
 
-        previousPosition = agentTransform.position;
+        previousPosition = GetAgentWorldPosition();
 
     }
 

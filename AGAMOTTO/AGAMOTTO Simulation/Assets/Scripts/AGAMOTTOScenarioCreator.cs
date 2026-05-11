@@ -464,7 +464,7 @@ namespace AGAMOTTO
             GameObject missionSettings = m_settingsPrefabGameObjects.FirstOrDefault(obj => obj.name == mission);
             AGAMOTTO_RL_Behavior RLBehavior = new AGAMOTTO_RL_Behavior(missionSettings, 1000f, tacticalGroup);
 
-            // One policy on the squad leader; movement commands move the whole friendly wedge via MoveGroupPath.
+            // One policy on the squad leader; movement uses squad teleport (see AGAMOTTO_ATD_Agent).
             Globals.api.agentSystem.SetAgentBehaviour(squadLeaderId, RLBehavior);
 
             return true;

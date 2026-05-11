@@ -483,6 +483,22 @@ PrefabInstance:
       propertyPath: m_Name
       value: TerrainLoader
       objectReference: {fileID: 0}
+    - target: {fileID: 2984047081105239029, guid: a3a45c41d3c371f42a2cc2fb417efdfc, type: 3}
+      propertyPath: m_lod
+      value: L20
+      objectReference: {fileID: 0}
+    - target: {fileID: 2984047081105239029, guid: a3a45c41d3c371f42a2cc2fb417efdfc, type: 3}
+      propertyPath: m_terrain
+      value: s3://ride-owt/NTC_Eastwood_Razish_Combined_L20_Tile/terrainDescriptionSplit.json
+      objectReference: {fileID: 0}
+    - target: {fileID: 2984047081105239029, guid: a3a45c41d3c371f42a2cc2fb417efdfc, type: 3}
+      propertyPath: m_loadTrees
+      value: 1
+      objectReference: {fileID: 0}
+    - target: {fileID: 2984047081105239029, guid: a3a45c41d3c371f42a2cc2fb417efdfc, type: 3}
+      propertyPath: m_terrainSO
+      value: 
+      objectReference: {fileID: 11400000, guid: f572d2eb5f2020a43bebac6100ce9106, type: 2}
     - target: {fileID: 7093745110511779441, guid: a3a45c41d3c371f42a2cc2fb417efdfc, type: 3}
       propertyPath: m_LocalPosition.x
       value: 0
