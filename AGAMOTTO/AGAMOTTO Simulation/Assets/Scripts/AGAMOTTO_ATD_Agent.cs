@@ -22,24 +22,38 @@ public class AGAMOTTO_ATD_Agent : RLAgent
     public RideVector3 m_enemyStartingPosition;
     private Vector3 previousPosition;
     private int episodeCounter = 0;
+    
+
     public override void OnEpisodeBegin()
     {
         episodeCounter++;
         Debug.Log($"Episode {episodeCounter}...");
         IAgentSystem agentSystem = Globals.api.agentSystem;
-        IMovementSystem movementSystem = Globals.api.movementSystem;
+        //IMovementSystem movementSystem = Globals.api.movementSystem;
+        Debug.Log($"Episode reset, moving agent from {agentTransform.position} to {m_enemyStartingPosition}");
+        //movementSystem.MoveTeleport(agent, m_startingPosition);
+        transform.localPosition = m_startingPosition;
 
-        base.OnEpisodeBegin();
+        // Prevent spurious first-step distance-delta reward based on an uninitialized previousPosition.
+        previousPosition = agentTransform.position;
 
+        // Reset velocity if using Rigidbody
+        //Rigidbody rb = agentTransform.GetComponent<Rigidbody>();
+        //rb.velocity = Vector3.zero;
+        //rb.angularVelocity = Vector3.zero;
 
-        //api.agentSystem.SetAgentState(agent, StateMachineUtils.IdleState);
-        movementSystem.MoveTeleport(agent, m_startingPosition);
 
         if (agentSystem.IsAgentDead(agent))
         {
             Debug.Log($"Episode reset and agent dead at step: {stepCount}");
             agentSystem.ReviveAgent(agent);
         }
+
+        //base.OnEpisodeBegin();
+
+
+        //api.agentSystem.SetAgentState(agent, StateMachineUtils.IdleState);
+ 
 
 
 
@@ -107,12 +121,12 @@ public class AGAMOTTO_ATD_Agent : RLAgent
         var maxSpeed = Globals.api.agentSystem.GetAgentMaxSpeed(agent);
         float deltaTime = Time.deltaTime;
 
-        newPos = agentTransform.position + direction * maxSpeed;// * deltaTime;
+        newPos = agentTransform.position + direction * maxSpeed * deltaTime;
         agentTransform.rotation = Quaternion.LookRotation(direction);
 
         if (api.movementSystem.IsPathValid(agentTransform.position, new RideVector3(newPos)))
         {
-            //var blueTeam = Globals.api.scenarioSystem.GetAgents(Team.Blue);
+            var blueTeam = Globals.api.scenarioSystem.GetAgents(Team.Blue);
             
             //var agentTeam = Globals.api.agentSystem.GetAgentTeam(agent);
             //Debug.Log("Invalid path");
@@ -129,10 +143,11 @@ public class AGAMOTTO_ATD_Agent : RLAgent
         float previousDistance = Vector3.Distance(previousPosition, enemyPos);
 
 
+        // Distance shaping should be small enough that terminal reward is still meaningful.
         if (enemyDist < previousDistance)
-            AddReward(+0.05f);
+            AddReward(+0.002f);
         else
-            AddReward(-0.02f);
+            AddReward(-0.0008f);
 
         if(stepCount > MaxStep)
         {
