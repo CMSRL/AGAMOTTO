@@ -1,8 +1,5 @@
-using Amazon.Rekognition.Model;
-using BllipParser.DotNet.Vanilla;
-using Fusion;
-using Pathfinding;
-using Photon.Realtime;
+using Google.Protobuf.WellKnownTypes;
+using Photon.Pun.Demo.PunBasics;
 using PimDeWitte.UnityMainThreadDispatcher;
 using Ride;
 using Ride.AI;
@@ -16,13 +13,15 @@ using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.IO;
-using System.Security.AccessControl;
+using System.Linq;
+using System.Net;
+using System.Threading.Tasks;
+using System.Transactions;
 using System.Xml;
 using Unity.AI.Navigation;
+using Unity.Collections.LowLevel.Unsafe;
 using UnityEngine;
 using UnityEngine.Serialization;
-using static UnityEngine.UI.CanvasScaler;
-using System.Linq;
 
 namespace AGAMOTTO
 {
@@ -72,9 +71,59 @@ namespace AGAMOTTO
         float m_startTime = 0;
 
         IWorldStateSystem worldStateSystem;
+        UnityGameObjectSystem unityGameObjectSystem;
 
         [FormerlySerializedAs("sceneGameObjects")]
         public GameObject[] m_settingsPrefabGameObjects;
+
+
+        public static class ExportData
+        {
+            /// <summary>
+            /// Collects runtime data and writes to a JSON file.
+            /// </summary>
+
+            public static void WriteStatus(string TerrainStatus = "Invalid")
+            {
+                // Example: Gather the values you care about
+                var payload = new StatusPayload
+                {
+                    status = TerrainStatus
+                };
+
+
+                // Writes next to the project root (Editor) or next to the executable (Player)
+                string outputPath = Path.Combine(Application.dataPath, "status.json");
+
+
+                // Make sure directory exists
+                var dir = Path.GetDirectoryName(outputPath);
+                if (!string.IsNullOrEmpty(dir) && !Directory.Exists(dir))
+                {
+                    Directory.CreateDirectory(dir);
+                }
+
+                // Serialize using Unity's JsonUtility (requires a serializable class)
+                string json = JsonUtility.ToJson(payload, prettyPrint: true);
+                File.WriteAllText(outputPath, json);
+
+                Debug.Log($"[ExportData] Wrote status to: {Path.GetFullPath(outputPath)}");
+                //Debug.Log($"[ExportData] Payload:\n{json}");
+            }
+
+            [System.Serializable]
+            private class StatusPayload
+            {
+                public string status;
+            }
+
+            public static void RemoveStatus()
+            {
+                string outputPath = Path.Combine(Application.dataPath, "status.json");
+                File.Delete(outputPath);
+            }
+        }
+
 
 
         protected override void Start()
@@ -82,6 +131,8 @@ namespace AGAMOTTO
             simulationState = new SimState();
             simulationState.State = SimStateType.LoadingTerrain;
             base.Start();
+            ExportData.WriteStatus("Invalid");
+
             entityList = new Dictionary<string, RideID>();
             worldStateSystem = Globals.api.worldStateSystem;
             worldStateSystem.AddListener<TerrainLoadedEvent>(WorldEvent.terrainLoaded, OnTerrainLoaded);
@@ -132,10 +183,163 @@ namespace AGAMOTTO
 
             OnGUILoadTerrainSplitLmab();
         }
+
+        /// <summary>
+        /// The heart of the scenario generator. Received a parsed Cot Message, creates units as shown in the CoT (if CoT is for a unit), and begins applicable scenario run based on AGAMOTTO dispatch mode
+        /// </summary>
+        private void ParseCotAndCreateEntity(XmlDocument doc)
+        {
+            try
+            {
+                XmlNode root = doc.SelectSingleNode("/event");
+
+                if (root != null)
+                {
+
+
+                    string uid = root.Attributes["uid"]?.Value;
+                    string type = root.Attributes["type"]?.Value;
+                    string time = root.Attributes["time"]?.Value;
+
+                    XmlNode pointNode = root.SelectSingleNode("point");
+                    string lat = pointNode.Attributes["lat"]?.Value;
+                    string lon = pointNode.Attributes["lon"]?.Value;
+
+                    XmlNode contactNode = root.SelectSingleNode("detail/contact");
+                    string callsign = contactNode?.Attributes["callsign"]?.Value;
+                    string mode = root.Attributes["mode"]?.Value;
+
+                    UnityMainThreadDispatcher.Instance().Enqueue(() =>
+                    {
+                        if (mode.Equals("Training"))
+                        {
+                            Debug.Log($"Received a CoT Message in RL Training Mode");
+                            //'a' is atomic, meaning it is a physical thin, like a unit
+                            if (type != null && type.StartsWith("a"))
+                            {
+                                string[] segments = type.Split('-');
+                                Debug.Log($"Creating {type} Unit at Lat:{lat}, Lon:{lon}");
+                                RideID unitCreated = CreateUnit(type, uid, double.Parse(lat), double.Parse(lon), false);
+                                //if friendly, begin training using desired mission and reward type
+                                if (segments[1].StartsWith('f'))
+                                {
+                                    Debug.Log("Beginning RL Training for Friendly Unit");
+                                    bool trainingStarted = StartRLTraining(unitCreated);
+                                }
+                                
+                            }
+
+                        }
+                        else if (mode.Equals("Evaluation"))
+                        {
+                            Debug.Log($"Received a CoT Message in Evaluation Mode - Creating entity {type}");
+                            if (type != null && type.StartsWith("a"))
+                            {
+                                RideID unitCreated = CreateUnit(type, uid, double.Parse(lat), double.Parse(lon), false);
+                            }
+
+                            if (type != null && type.EndsWith("r"))
+                            {
+                                //If CoT message is a route, create route in RIDE, and associate with the applicable entity
+                                XmlNode routeNode = root.SelectSingleNode("detail/route");
+
+                                int routeSize = 0;
+
+                                // inelegant; replace
+                                foreach (XmlNode point in routeNode)
+                                {
+                                    routeSize++;
+                                }
+                                RideVector3[] path = new RideVector3[routeSize];
+
+                                //Debug.Log(routeSize);
+                                int counter = 0;
+                                foreach (XmlNode point in routeNode)
+                                {
+                                    string lat = point.Attributes["lat"]?.Value;
+                                    string lon = point.Attributes["lon"]?.Value;
+                                    string hae = point.Attributes["hae"]?.Value;
+                                    RideVector3 scenPos = Globals.api.terrainSystem.ConvertToScenePosition(Convert.ToDouble(lat), Convert.ToDouble(lon));
+                                    path[counter] = scenPos;
+                                    //Debug.Log($"Point - Lat: {lat}, Lon: {lon}, HAE: {hae}");
+                                    counter++;
+                                }
+                                Debug.Log($"Attempting to create path for {callsign}");
+                                //associate with existing entity
+                                bool success = CreatePath(callsign, path);
+                                
+                            }
+                        }
+                        else if (mode.Equals("Hybrid"))
+                        {
+                            Debug.Log($"Received a CoT Message in Hybrid Mode - Creating entity {type}");
+                            if (type != null && type.StartsWith("a"))
+                            {
+                                RideID unitCreated = CreateUnit(type, uid, double.Parse(lat), double.Parse(lon), true);
+                            }
+
+                            if (type != null && type.EndsWith("r"))
+                            {
+                                //Debug.Log("Received a route");
+                                //Debug.Log(type);
+                                XmlNode routeNode = root.SelectSingleNode("detail/route");
+
+                                int routeSize = 0;
+
+                                // inelegant; replace
+                                foreach (XmlNode point in routeNode)
+                                {
+                                    routeSize++;
+                                }
+                                RideVector3[] path = new RideVector3[routeSize];
+
+                                //Debug.Log(routeSize);
+                                int counter = 0;
+                                foreach (XmlNode point in routeNode)
+                                {
+                                    string lat = point.Attributes["lat"]?.Value;
+                                    string lon = point.Attributes["lon"]?.Value;
+                                    string hae = point.Attributes["hae"]?.Value;
+                                    RideVector3 scenPos = Globals.api.terrainSystem.ConvertToScenePosition(Convert.ToDouble(lat), Convert.ToDouble(lon));
+                                    path[counter] = scenPos;
+                                    //Debug.Log($"Point - Lat: {lat}, Lon: {lon}, HAE: {hae}");
+                                    counter++;
+                                }
+                                Debug.Log($"Attempting to create path for {callsign}");
+                                //associate with existing entity
+                                bool success = CreatePath(callsign, path);
+                                //wait until path completion and mission success/failure
+                                //await WaitUntilATDComplete(callsign);
+                            }
+
+
+                        }
+
+
+                    });
+                }
+
+
+
+
+                else
+                {
+                    Debug.Log("No <root> node found.");
+                }
+
+
+            }
+            catch (Exception ex)
+            {
+                Debug.Log(doc + "\r\n\r\n" + ex.Message);
+                throw ex;
+            }
+        }
         protected virtual void OnTerrainLoaded(WorldEventMarker marker, TerrainLoadedEvent e)
         {
             Debug.Log("Terrain Finished Loading");
-            
+            ExportData.WriteStatus("Valid");
+
 
         }
 
@@ -146,6 +350,8 @@ namespace AGAMOTTO
             if (entityList.ContainsKey(callsign) && simulationState.State == SimStateType.Idle)
             {
                 Globals.api.movementSystem.MoveGroupPath(entityList[callsign], path, FormationProcedureType.Wedge);
+                //Need methods to determine when movement complete
+
 
             }
             else
@@ -157,7 +363,45 @@ namespace AGAMOTTO
                 return true;
         }
 
-        bool CreateUnit(string cotType, string uid, double lat, double lng)
+        public bool IsATDMissionComplete(Ride.Team team)
+        {
+            
+            IEnumerable<RideID> groupAgents = Globals.api.scenarioSystem.GetAgents(team);
+            if (groupAgents == null) return false;
+
+            IEnumerable<RideID> enemyAgents = Globals.api.scenarioSystem.GetAgents(Ride.Team.Red);
+            if (enemyAgents == null) return false;
+
+            bool groupDead = groupAgents != null && groupAgents.All(m => Globals.api.agentSystem.IsAgentDead(m));
+
+            bool enemyDead = enemyAgents != null && enemyAgents.All(m => Globals.api.agentSystem.IsAgentDead(m));
+
+            return (groupDead || enemyDead);
+        }
+
+
+        public async Task WaitUntilATDComplete(string tacticalGroupleader)
+        {
+
+
+            RideID tacticalGroup = entityList[tacticalGroupleader];
+
+            bool actionComplete = IsATDMissionComplete(Ride.Team.Blue);
+
+            Debug.Log("Waiting for ATD complete...");
+
+
+            while (actionComplete) 
+            {
+                //need a backstop timeout for a stalemate
+                await Task.Delay(1000); // non-blocking wait
+                
+            }
+
+            Debug.Log("ATD mission complete!");
+        }
+
+        RideID CreateUnit(string cotType, string uid, double lat, double lng, bool imitationLearning)
         {
             if(simulationState.State == SimStateType.TerrainLoaded || simulationState.State == SimStateType.Idle)
             {
@@ -168,91 +412,62 @@ namespace AGAMOTTO
                     case "f":
                         if (!entityList.ContainsKey(uid))
                         {
-                            RideID alphaSquad = Globals.api.agentSystem.CreateSquad(new UnitCreationParams(uid) { rows = 2, cols = 2, position = scenPos, rotation = RideQuaternion.Euler(0, -90, 0), team = Team.Blue });
-                            entityList.Add(uid, alphaSquad);   
+                            RideID alphaSquad;
+                            if (imitationLearning)
+                            {
+                                alphaSquad = Globals.api.agentSystem.CreateSquad(new UnitCreationParams(uid) {prefab = "ChrUsaArmyInfantryOcpMLPrefab", rows = 2, cols = 2, position = scenPos, rotation = RideQuaternion.Euler(0, -90, 0), team = Ride.Team.Blue });
+                            }
+                            else
+                            {
+                                alphaSquad = Globals.api.agentSystem.CreateSquad(new UnitCreationParams(uid) { prefab = "ChrUsaArmyInfantryOcpMLPrefab", rows = 2, cols = 2, position = scenPos, rotation = RideQuaternion.Euler(0, -90, 0), team = Ride.Team.Blue });
+                            }
+                                
+                            entityList.Add(uid, alphaSquad);
+                            simulationState.State = SimStateType.Idle;
+                            return alphaSquad;
                         }
-                        simulationState.State = SimStateType.Idle;
-                        return true;
-                        //break;
+                        break;
+                        
 
                     case "h":
                         if (!entityList.ContainsKey(uid))
                         {
-                            RideID insurgents = Globals.api.agentSystem.CreateSquad(new UnitCreationParams(uid) { rows = 2, cols = 2, position = scenPos, rotation = RideQuaternion.Euler(0, 0, 0), team = Team.Red });
+                            RideID insurgents = Globals.api.agentSystem.CreateSquad(new UnitCreationParams(uid) { rows = 2, cols = 2, position = scenPos, rotation = RideQuaternion.Euler(0, 0, 0), team = Ride.Team.Red });
                             entityList.Add(uid, insurgents);
+                            simulationState.State = SimStateType.Idle;
+                            return insurgents;
                         }
-                        simulationState.State = SimStateType.Idle;
-                        return true;
+                        break;
 
+                    default:
+                        Debug.Log("CoT type invalid - cannot create unit!");
+                        break;
+                        
                 }
-                return true;
+                return new RideID(0, 0);
+
             }
             else
             {
                 Debug.Log("Terrain Not Loaded - Cannot Create Units");
-                return false;
+                return new RideID(0, 0);
             }
 
         }
 
-        bool CreateMLUnit(string cotType, string uid, double lat, double lng)
+        bool StartRLTraining(RideID tacticalGroup, string mission = "AttackToDestroy")
         {
-            if (simulationState.State == SimStateType.TerrainLoaded || simulationState.State == SimStateType.Idle)
-            {
-                string[] segments = cotType.Split('-');
-                RideVector3 scenPos = Globals.api.terrainSystem.ConvertToScenePosition(lat, lng);
-                IGroupSystem groupSystem = Globals.api.groupSystem;
-                switch (segments[1])
-                {
-                    case "f":
-                        if (!entityList.ContainsKey(uid))
-                        {
-                            //create custom ML-enabled prefab 
-                            RideID alphaSquad = Globals.api.agentSystem.CreateSquad(new UnitCreationParams(uid) {prefab = "ChrUsaArmyInfantryOcpMLPrefab", rows = 2, cols = 2, position = scenPos, rotation = RideQuaternion.Euler(0, -90, 0), team = Team.Blue });
-                            RideID groupLeaderId = groupSystem.GetGroupLeader(alphaSquad);
-                            IEnumerable<RideID> mlAgents = Globals.api.scenarioSystem.GetAgents(Team.Blue);
+            RideID squadLeaderId = Globals.api.groupSystem.GetGroupLeader(tacticalGroup);
 
-                            var goSystem = Globals.api.GetSystem<IGameObjectSystem>();
+            //collect settings specific to ATD, which includes custom ATD agent
+            Debug.Log($"Beginning RL Training for RIDE Unit {tacticalGroup.id} with Mission: {mission}");
+            GameObject missionSettings = m_settingsPrefabGameObjects.FirstOrDefault(obj => obj.name == mission);
+            AGAMOTTO_RL_Behavior RLBehavior = new AGAMOTTO_RL_Behavior(missionSettings, 1000f, tacticalGroup);
 
-                            //collect settings specific to ATD, which includes custom ATD agent
-                            GameObject settings = m_settingsPrefabGameObjects.FirstOrDefault(obj => obj.name == "AttackToDestroyMLSettings");
-                            AGAMOTTO_RL_Behavior RLBehavior= new AGAMOTTO_RL_Behavior(settings, RideUtils.Infinity);
-                            foreach (var agent in mlAgents)
-                            {
-                                Globals.api.agentSystem.SetAgentBehaviour(agent, RLBehavior);
-                            }
-                            //Globals.api.agentSystem.SetAgentBehaviour(groupLeaderId, attackToDestroy);
+            // One policy on the squad leader; movement uses squad teleport (see AGAMOTTO_ATD_Agent).
+            Globals.api.agentSystem.SetAgentBehaviour(squadLeaderId, RLBehavior);
 
-
-                            entityList.Add(uid, alphaSquad);
-                        }
-                        
-
-
-                        simulationState.State = SimStateType.Idle;
-                        return true;
-                    //break;
-
-                    case "h":
-                        if (!entityList.ContainsKey(uid))
-                        {
-                            RideID insurgents = Globals.api.agentSystem.CreateSquad(new UnitCreationParams(uid) {prefab = "ChrIrqInsurgentMleAdultAvg01Prefab", rows = 2, cols = 2, position = scenPos, rotation = RideQuaternion.Euler(0, 0, 0), team = Team.Red });
-                            RideID groupLeaderId = groupSystem.GetGroupLeader(insurgents);
-                            //goSystem.AddComponent<AGAMOTTOMLAgent>(groupLeaderId);
-                            entityList.Add(uid, insurgents);
-                        }
-                        simulationState.State = SimStateType.Idle;
-                        return true;
-
-                }
-                return true;
-            }
-            else
-            {
-                Debug.Log("Terrain Not Loaded - Cannot Create Units");
-                return false;
-            }
-
+            return true;
         }
 
         protected virtual void OnGUILoadTerrainSplitLmab()
@@ -428,7 +643,10 @@ namespace AGAMOTTO
         private void OnDestroy()
         {
             StopAllCoroutines();
+            ExportData.RemoveStatus();
         }
+
+
 
         private void OnChanged(object sender, FileSystemEventArgs e)
         {
@@ -439,98 +657,8 @@ namespace AGAMOTTO
 
             Debug.Log($"Changed: {e.FullPath}");
             XmlDocument doc = new XmlDocument();
-            try
-            {
-                doc.Load(e.FullPath);
-                //Debug.Log(doc.InnerText);
-                XmlNode root = doc.SelectSingleNode("/event");
-
-                if (root != null)
-                {
-
-
-                    string uid = root.Attributes["uid"]?.Value;
-                    string type = root.Attributes["type"]?.Value;
-                    string time = root.Attributes["time"]?.Value;
-                    
-                    XmlNode pointNode = root.SelectSingleNode("point");
-                    string lat = pointNode.Attributes["lat"]?.Value;
-                    string lon = pointNode.Attributes["lon"]?.Value;
-
-                    XmlNode contactNode = root.SelectSingleNode("detail/contact");
-                    string callsign = contactNode?.Attributes["callsign"]?.Value;
-                    string mode = root.Attributes["mode"]?.Value;
-
-                    UnityMainThreadDispatcher.Instance().Enqueue(() =>
-                    {
-                        if (mode.Equals("training"))
-                        {
-                            if (type != null && type.StartsWith("a"))
-                            {
-                                bool success = CreateMLUnit(type, uid, double.Parse(lat), double.Parse(lon));
-                            }
-
-                        }
-                        else
-                        {
-                            if (type != null && type.StartsWith("a"))
-                            {
-                                bool success = CreateUnit(type, uid, double.Parse(lat), double.Parse(lon));
-                            }
-
-                            if (type != null && type.EndsWith("r"))
-                            {
-                                //Debug.Log("Received a route");
-                                //Debug.Log(type);
-                                XmlNode routeNode = root.SelectSingleNode("detail/route");
-
-                                int routeSize = 0;
-
-                                // inelegant; replace
-                                foreach (XmlNode point in routeNode)
-                                {
-                                    routeSize++;
-                                }
-                                RideVector3[] path = new RideVector3[routeSize];
-
-                                //Debug.Log(routeSize);
-                                int counter = 0;
-                                foreach (XmlNode point in routeNode)
-                                {
-                                    string lat = point.Attributes["lat"]?.Value;
-                                    string lon = point.Attributes["lon"]?.Value;
-                                    string hae = point.Attributes["hae"]?.Value;
-                                    RideVector3 scenPos = Globals.api.terrainSystem.ConvertToScenePosition(Convert.ToDouble(lat), Convert.ToDouble(lon));
-                                    path[counter] = scenPos;
-                                    //Debug.Log($"Point - Lat: {lat}, Lon: {lon}, HAE: {hae}");
-                                    counter++;
-                                }
-                                Debug.Log($"Attempting to create path for {callsign}");
-                                //associate with existing entity
-                                bool success = CreatePath(callsign, path);
-                            }
-                        }
-
-
-                    });
-                }
-
-
-
-
-                else
-                {
-                    Debug.Log("No <root> node found.");
-                }
-
-
-            }
-            catch (Exception ex)
-            {
-                Debug.Log(doc + "\r\n\r\n" + ex.Message);
-                throw ex;
-            } 
-            
+            doc.Load(e.FullPath);
+            ParseCotAndCreateEntity(doc);
 
 
 
@@ -540,65 +668,8 @@ namespace AGAMOTTO
         {
             string value = $"Created: {e.FullPath}";
             XmlDocument doc = new XmlDocument();
-            try
-            {
-                doc.Load(e.FullPath);
-                XmlNode root = doc.SelectSingleNode("/root");
-
-                if (root != null)
-                {
-                    string callsign = root.SelectSingleNode("callsign")?.InnerText;
-                    string ce = root.SelectSingleNode("ce")?.InnerText;
-                    string hae = root.SelectSingleNode("hae")?.InnerText;
-                    string how = root.SelectSingleNode("how")?.InnerText;
-                    string lat = root.SelectSingleNode("lat")?.InnerText;
-                    string le = root.SelectSingleNode("le")?.InnerText;
-                    string lon = root.SelectSingleNode("lon")?.InnerText;
-                    string stale = root.SelectSingleNode("stale")?.InnerText;
-                    string start = root.SelectSingleNode("start")?.InnerText;
-                    string time = root.SelectSingleNode("time")?.InnerText;
-                    string type = root.SelectSingleNode("type")?.InnerText;
-                    string uid = root.SelectSingleNode("uid")?.InnerText;
-
-                    /*Debug.Log("----- Parsed CoT Message -----");
-                    Debug.Log($"Callsign: {callsign}");
-                    Debug.Log($"CE: {ce}");
-                    Debug.Log($"HAE: {hae}");
-                    Debug.Log($"How: {how}");
-                    Debug.Log($"Lat: {lat}");
-                    Debug.Log($"Lon: {lon}");
-                    Debug.Log($"LE: {le}");
-                    Debug.Log($"Time: {time}");
-                    Debug.Log($"Start: {start}");
-                    Debug.Log($"Stale: {stale}");
-                    Debug.Log($"Type: {type}");
-                    Debug.Log($"UID: {uid}");*/
-
-                    UnityMainThreadDispatcher.Instance().Enqueue(() =>
-                    {
-                        //a = atomic, meaning it is a physical entity
-                        if (type.StartsWith("a"))
-                        {
-                            bool success = CreateUnit(type, callsign, double.Parse(lat), double.Parse(lon));
-                        }
-                    });
-                }
-
-
-
-
-                else
-                {
-                    Debug.Log("No <root> node found.");
-                }
-
-
-            }
-            catch (Exception ex)
-            {
-                Debug.Log(doc + "\r\n\r\n" + ex.Message);
-                throw ex;
-            }
+            doc.Load(e.FullPath);
+            ParseCotAndCreateEntity(doc);
         }
 
         private static void OnDeleted(object sender, FileSystemEventArgs e) =>

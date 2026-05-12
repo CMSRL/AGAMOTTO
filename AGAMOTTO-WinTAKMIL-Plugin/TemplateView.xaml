@@ -139,10 +139,10 @@
                 <DockPanel LastChildFill="False">
                     <StackPanel Orientation="Horizontal" DockPanel.Dock="Left" HorizontalAlignment="Left" Margin="0,0,8,0">
                         <TextBlock Text="IP" Style="{StaticResource LabelText}"/>
-                        <TextBox Text="{Binding TargetIp, UpdateSourceTrigger=PropertyChanged}" Width="220" Margin="0,0,16,0" ToolTip="127.0.0.1"/>
+                        <TextBox Text="{Binding IpAddress, UpdateSourceTrigger=PropertyChanged}" Width="220" Margin="0,0,16,0" ToolTip="127.0.0.1"/>
 
                         <TextBlock Text="Port" Style="{StaticResource LabelText}"/>
-                        <TextBox Text="{Binding TargetPort, UpdateSourceTrigger=PropertyChanged}" Width="90" Margin="0,0,16,0" ToolTip="65432"/>
+                        <TextBox Text="{Binding Port, UpdateSourceTrigger=PropertyChanged}" Width="90" Margin="0,0,16,0" ToolTip="65432"/>
 
                         <Button Content="Test Connection" Command="{Binding TestConnectionCommand}"
                                 Style="{StaticResource GhostButton}" Width="140" Margin="0,0,8,0"/>
@@ -167,6 +167,7 @@
             </StackPanel>
         </Border>
 
+        
         <!-- Configuration -->
         <Border Grid.Row="1" Style="{StaticResource CardStyle}" Grid.ColumnSpan="2">
             <StackPanel>
@@ -175,18 +176,43 @@
                 <!-- Mode -->
                 <StackPanel Orientation="Horizontal" Margin="0,6,0,0">
                     <TextBlock Text="Mode:" Style="{StaticResource LabelText}" Margin="0,0,12,0"/>
-                    <RadioButton Content="Visualization"
+                    <RadioButton Content="Evaluation"
                      GroupName="Mode"
                      IsChecked="True"
-                     Command="{Binding SetVisualizationModeCommand}"
+                     Command="{Binding SetEvaluationModeCommand}"
                      Margin="0,0,16,0"
                      Style="{StaticResource DarkRadio}"/>
 
                     <RadioButton Content="Training"
                      GroupName="Mode"
                      Command="{Binding SetTrainingModeCommand}"
+                                 Margin="0,0,16,0"
+                     Style="{StaticResource DarkRadio}"/>
+
+                    <RadioButton Content="Hybrid"
+                     GroupName="Mode"
+                     Command="{Binding SetHybridModeCommand}"
                      Style="{StaticResource DarkRadio}"/>
                 </StackPanel>
+
+                <!-- Mission -->
+                <StackPanel Orientation="Horizontal" Margin="0,10,0,0">
+                    <TextBlock Text="Mission:" Style="{StaticResource LabelText}" Margin="0,0,12,0"/>
+                    <RadioButton Content="Attack To Destroy"
+                     GroupName="Mission"
+                     IsChecked="True"
+                     Command="{Binding SetATDModeCommand}"
+                     Margin="0,0,16,0"
+                     Style="{StaticResource DarkRadio}"/>
+
+                    <RadioButton Content="Retain to Defeat"
+                     GroupName="Mission"
+                     Command="{Binding SetRTDModeCommand}"
+                                 Margin="0,0,16,0"
+                     Style="{StaticResource DarkRadio}"/>
+
+                </StackPanel>
+
             </StackPanel>
         </Border>
 

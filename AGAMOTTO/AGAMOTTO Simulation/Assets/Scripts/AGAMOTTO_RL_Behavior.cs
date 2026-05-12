@@ -1,67 +1,276 @@
-using Google.Protobuf.WellKnownTypes;
-using Newtonsoft.Json.Utilities;
 using Ride;
 using Ride.AI;
 using Ride.AI.RL;
 using System;
-using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
 using Unity.MLAgents.Policies;
 using UnityEngine;
 
-
-public class AGAMOTTO_RL_Behavior: MLBehaviour
+public class AGAMOTTO_RL_Behavior : MLBehaviour
 {
     /// <summary>
-    /// The max distance of an enemy from the agent before it is disregarded
+    /// Max distance from the learning agent when querying candidate enemies (world units).
     /// </summary>
-    public float maxEnemyDistance = RideUtils.Infinity;
-    public AGAMOTTO_RL_Behavior(UnityEngine.GameObject behaviourSettings, float maxEnemyDistance) : base(behaviourSettings)
+    public float maxEnemyDistance = 1000f;
+
+    /// <summary>
+    /// Horizontal radius (meters) around the friendly leader used to decide which Blue agents belong to this squad for spawn snapshots.
+    /// </summary>
+    public float friendlySquadSpawnCaptureRadiusM = 800f;
+
+    /// <summary>
+    /// Horizontal radius (meters) around the assigned enemy anchor used for Red spawn snapshots.
+    /// </summary>
+    public float enemySquadSpawnCaptureRadiusM = 800f;
+
+    /// <summary>
+    /// After the first spawn snapshot, wait this long (ms) and capture again so late-spawned units are included.
+    /// </summary>
+    public int delayedSpawnSnapshotMs = 500;
+
+    /// <summary>
+    /// Poll interval while waiting for at least one enemy (milliseconds).
+    /// </summary>
+    public int enemySpawnPollIntervalMs = 100;
+
+    /// <summary>
+    /// Stop waiting after this many polls (total wait ~= max * interval).
+    /// </summary>
+    public int enemySpawnWaitMaxPolls = 300;
+
+    /// <summary>Friendly squad / tactical group id (passed to the ATD agent for future group logic).</summary>
+    readonly RideID _friendlyTacticalGroup;
+
+    /// <summary>Alternates ML-Agents <c>TeamId</c> (0/1) per installed squad so two friendly training groups map to two trainer teams while sharing <c>AGAMOTTO_RL</c>.</summary>
+    static int s_nextMlAgentsTeamId;
+
+    public AGAMOTTO_RL_Behavior(UnityEngine.GameObject behaviourSettings, float maxEnemyDistance, RideID friendlyTacticalGroup = default)
+        : base(behaviourSettings)
     {
         this.maxEnemyDistance = maxEnemyDistance;
+        _friendlyTacticalGroup = friendlyTacticalGroup;
     }
 
     async protected override void InitMLBehaviour()
     {
-        base.InitMLBehaviour();
-        AGAMOTTO_ATD_Agent mlagent = GetRLAgent<AGAMOTTO_ATD_Agent>();
-        mlagent.gameObject.GetComponent<BehaviorParameters>().BehaviorName = "AGAMOTTO_RL";
-        mlagent.m_startingPosition = mlagent.gameObject.transform.position;
-        await WaitUntilEnemySpawn(mlagent);
-        Team team = api.agentSystem.GetAgentTeam(entity) == Team.Blue ? Team.Red : Team.Blue;
-        IEnumerable<RideID> enemies = api.scenarioSystem.GetAgents(mlagent.agentTransform.position, maxEnemyDistance, team);
-        foreach (RideID id in enemies)
+        try
         {
-            mlagent.m_enemy = id;
-            mlagent.m_enemyStartingPosition = api.GetSystem<ITransformSystem>().GetPosition(id);
-        }
+            base.InitMLBehaviour();
+            AGAMOTTO_ATD_Agent mlagent = GetRLAgent<AGAMOTTO_ATD_Agent>();
+            // Ensure RIDE id + Unity transform track the behaviour entity (squad leader), not the mission prefab root.
+            mlagent.Init(api, entity);
+            BehaviorParameters bp = mlagent.gameObject.GetComponent<BehaviorParameters>();
+            bp.BehaviorName = "AGAMOTTO_RL";
+            // Two squads → two ML-Agents teams for cooperative multi-squad training (same behavior name, shared policy file).
+            bp.TeamId = s_nextMlAgentsTeamId & 1;
+            if (s_nextMlAgentsTeamId < int.MaxValue - 1)
+                s_nextMlAgentsTeamId++;
+            mlagent.m_squadTacticalGroup = _friendlyTacticalGroup;
 
+            bool enemiesReady = await WaitUntilEnemySpawn(mlagent);
+            if (!enemiesReady)
+            {
+                Debug.LogError("AGAMOTTO_RL_Behavior: Timed out waiting for an enemy. Agent enemy target was not set.");
+                return;
+            }
+
+            // Snapshot start pose from sim (leader entity), not the mission prefab transform.
+            mlagent.m_startingPosition = api.GetSystem<ITransformSystem>().GetPosition(entity);
+
+            Team team = api.agentSystem.GetAgentTeam(entity) == Team.Blue ? Team.Red : Team.Blue;
+            IEnumerable<RideID> enemies = api.scenarioSystem.GetAgents(mlagent.agentTransform.position, maxEnemyDistance, team);
+            if (!TryAssignClosestEnemy(mlagent, enemies))
+                Debug.LogError("AGAMOTTO_RL_Behavior: No enemies found after wait; cannot assign m_enemy.");
+
+            ApplyEpisodeSpawnSnapshots(mlagent);
+            if (delayedSpawnSnapshotMs > 0)
+            {
+                await Task.Delay(delayedSpawnSnapshotMs);
+                ApplyEpisodeSpawnSnapshots(mlagent);
+            }
+        }
+        catch (Exception ex)
+        {
+            Debug.LogException(ex);
+        }
     }
 
-
-
-    public async Task WaitUntilEnemySpawn(AGAMOTTO_ATD_Agent mlagent)
+    void ApplyEpisodeSpawnSnapshots(AGAMOTTO_ATD_Agent mlagent)
     {
-        
-        
+        Team friendly = api.agentSystem.GetAgentTeam(entity);
+        Team hostile = friendly == Team.Blue ? Team.Red : Team.Blue;
+        List<RideID> friendlies = CollectSquadAgentsNear(entity, friendly, friendlySquadSpawnCaptureRadiusM);
+        List<RideID> hostiles = CollectEnemySquadNearAnchor(mlagent, hostile, enemySquadSpawnCaptureRadiusM);
+        mlagent.SetEpisodeSpawnSnapshots(friendlies, hostiles);
+    }
+
+    /// <summary>
+    /// Blues near this behaviour's <paramref name="leaderEntity"/> (not every Blue on the map), merged from spatial query and horizontal distance filter.
+    /// </summary>
+    List<RideID> CollectSquadAgentsNear(RideID leaderEntity, Team team, float horizontalRadiusM)
+    {
+        ITransformSystem ts = api.GetSystem<ITransformSystem>();
+        var ss = api.scenarioSystem;
+        RideVector3 anchorRv = ts.GetPosition(leaderEntity);
+        var anchor = new Vector3((float)anchorRv.x, (float)anchorRv.y, (float)anchorRv.z);
+        float r2 = horizontalRadiusM * horizontalRadiusM;
+
+        var seen = new HashSet<(int, int)>();
+        var result = new List<RideID>();
+
+        void TryAdd(RideID id)
+        {
+            if (!AGAMOTTO_ATD_Agent.IsValidRideId(id) || !seen.Add((id.id, id.version)))
+                return;
+            RideVector3 p = ts.GetPosition(id);
+            float hdx = (float)(p.x - anchorRv.x);
+            float hdz = (float)(p.z - anchorRv.z);
+            if (hdx * hdx + hdz * hdz > r2)
+                return;
+            result.Add(id);
+        }
+
+        IEnumerable<RideID> spatial = ss.GetAgents(anchor, horizontalRadiusM, team);
+        if (spatial != null)
+        {
+            foreach (RideID id in spatial)
+                TryAdd(id);
+        }
+
+        IEnumerable<RideID> allTeam = ss.GetAgents(team);
+        if (allTeam != null)
+        {
+            foreach (RideID id in allTeam)
+                TryAdd(id);
+        }
+
+        return result;
+    }
+
+    /// <summary>
+    /// Reds near <see cref="AGAMOTTO_ATD_Agent.m_enemy"/> when set; otherwise all reds (single-team fallback).
+    /// </summary>
+    List<RideID> CollectEnemySquadNearAnchor(AGAMOTTO_ATD_Agent mlagent, Team team, float horizontalRadiusM)
+    {
+        ITransformSystem ts = api.GetSystem<ITransformSystem>();
+        var ss = api.scenarioSystem;
+
+        if (!AGAMOTTO_ATD_Agent.IsValidRideId(mlagent.m_enemy))
+            return ToDedupedList(ss.GetAgents(team));
+
+        RideVector3 anchorRv = ts.GetPosition(mlagent.m_enemy);
+        var anchor = new Vector3((float)anchorRv.x, (float)anchorRv.y, (float)anchorRv.z);
+        float r2 = horizontalRadiusM * horizontalRadiusM;
+
+        var seen = new HashSet<(int, int)>();
+        var result = new List<RideID>();
+
+        void TryAdd(RideID id)
+        {
+            if (!AGAMOTTO_ATD_Agent.IsValidRideId(id) || !seen.Add((id.id, id.version)))
+                return;
+            RideVector3 p = ts.GetPosition(id);
+            float hdx = (float)(p.x - anchorRv.x);
+            float hdz = (float)(p.z - anchorRv.z);
+            if (hdx * hdx + hdz * hdz > r2)
+                return;
+            result.Add(id);
+        }
+
+        IEnumerable<RideID> spatial = ss.GetAgents(anchor, horizontalRadiusM, team);
+        if (spatial != null)
+        {
+            foreach (RideID id in spatial)
+                TryAdd(id);
+        }
+
+        IEnumerable<RideID> allTeam = ss.GetAgents(team);
+        if (allTeam != null)
+        {
+            foreach (RideID id in allTeam)
+                TryAdd(id);
+        }
+
+        return result;
+    }
+
+    static List<RideID> ToDedupedList(IEnumerable<RideID> source)
+    {
+        var seen = new HashSet<(int, int)>();
+        var result = new List<RideID>();
+        if (source == null)
+            return result;
+        foreach (RideID id in source)
+        {
+            if (!AGAMOTTO_ATD_Agent.IsValidRideId(id) || !seen.Add((id.id, id.version)))
+                continue;
+            result.Add(id);
+        }
+        return result;
+    }
+
+    /// <summary>
+    /// Picks the enemy closest to the ML agent and stores it plus that enemy's starting position.
+    /// </summary>
+    bool TryAssignClosestEnemy(AGAMOTTO_ATD_Agent mlagent, IEnumerable<RideID> enemies)
+    {
+        ITransformSystem transformSystem = api.GetSystem<ITransformSystem>();
+        Vector3 agentPos = mlagent.agentTransform.position;
+
+        RideID bestId = default;
+        RideVector3 bestPos = default;
+        float bestSqr = float.PositiveInfinity;
+
+        foreach (RideID id in enemies)
+        {
+            RideVector3 p = transformSystem.GetPosition(id);
+            var dx = (float)(p.x - agentPos.x);
+            var dy = (float)(p.y - agentPos.y);
+            var dz = (float)(p.z - agentPos.z);
+            float sqr = dx * dx + dy * dy + dz * dz;
+            if (sqr < bestSqr)
+            {
+                bestSqr = sqr;
+                bestId = id;
+                bestPos = p;
+            }
+        }
+
+        if (float.IsPositiveInfinity(bestSqr))
+            return false;
+
+        mlagent.m_enemy = bestId;
+        mlagent.m_enemyStartingPosition = bestPos;
+        return true;
+    }
+
+    /// <summary>
+    /// Waits until the scenario system's agent query returns at least one enemy, or until timeout.
+    /// </summary>
+    /// <returns>True if at least one enemy is available; false on timeout.</returns>
+    public async Task<bool> WaitUntilEnemySpawn(AGAMOTTO_ATD_Agent mlagent)
+    {
         Team team = api.agentSystem.GetAgentTeam(entity) == Team.Blue ? Team.Red : Team.Blue;
         IEnumerable<RideID> enemies = api.scenarioSystem.GetAgents(mlagent.agentTransform.position, maxEnemyDistance, team);
-        Debug.Log("Waiting for condition...");
+        Debug.Log("AGAMOTTO_RL_Behavior: Waiting for enemy spawn...");
 
-        while (enemies.Count() == 0)
+        int polls = 0;
+        while (!enemies.Any())
         {
-            // Do something or just wait
-            await Task.Delay(100); // non-blocking wait
+            if (polls >= enemySpawnWaitMaxPolls)
+            {
+                Debug.LogError($"AGAMOTTO_RL_Behavior: No enemy after {polls * enemySpawnPollIntervalMs} ms (max polls={enemySpawnWaitMaxPolls}).");
+                return false;
+            }
+
+            await Task.Delay(enemySpawnPollIntervalMs);
+            polls++;
             enemies = api.scenarioSystem.GetAgents(mlagent.agentTransform.position, maxEnemyDistance, team);
         }
 
-        Debug.Log("Condition met!");
+        Debug.Log("AGAMOTTO_RL_Behavior: Enemy spawn condition met.");
+        return true;
     }
-
-
-
 }
-
-

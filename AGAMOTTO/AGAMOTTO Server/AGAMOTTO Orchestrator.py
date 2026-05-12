@@ -1,9 +1,13 @@
 import socket
 import os
 import sys
-
+import subprocess
+from pathlib import Path
 import xmltodict
+import asyncio
+import threading
 from dict2xml import dict2xml
+import json
 from XMLHelpers import parse_cot, generate_cot_point, generate_cot_point_wrapper
 from xml.etree.ElementTree import Element, SubElement, tostring
 import xml.etree.ElementTree as ET
@@ -18,6 +22,34 @@ ROUTE_DIR = os.path.join(UNITY_DIR, "routes")
 os.makedirs(UNITY_DIR, exist_ok=True)
 os.makedirs(ENT_DIR, exist_ok=True)
 os.makedirs(ROUTE_DIR, exist_ok=True)
+
+
+async def play_unity_scene_async(unity_exe, project_path, scene_path=None, batchmode=False):
+    cmd = [
+        unity_exe,
+        "-projectPath", project_path,
+        "-executeMethod", "PlaySceneCommand.PlayScene",
+        "-logFile", "-"
+    ]
+
+
+    if scene_path:
+        cmd += ["-scenePath", scene_path]
+    if batchmode:
+        cmd += ["-batchmode", "-nographics"]
+
+    process = await asyncio.create_subprocess_exec(
+        *cmd,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.STDOUT
+    )
+
+    async for line in process.stdout:
+        print(line.decode().strip())
+
+    await process.wait()
+    print("Unity process finished.")
+
 
 def save_xml(kind, uid, xml_data):
     """kind: 'entity' or 'route'"""
@@ -137,5 +169,34 @@ def start_server():
 
                     continue
 
-if __name__ == "__main__":
-    start_server()
+def run_async_in_thread(coro):
+    def thread_target():
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        loop.run_until_complete(coro)
+    t = threading.Thread(target=thread_target)
+    t.start()
+    return t
+
+async def main():
+
+    unity_exe = r"C:\Program Files\Unity\Hub\Editor\2022.3.13f1\Editor\Unity.exe"
+    project_path = r"C:\Users\matthew.corbett\AGAMOTTO\AGAMOTTO\AGAMOTTO Simulation"
+    scene_path = r"Assets\Scenes\BaseScene.unity"
+    terrain_reporting_path = r"C:\Users\matthew.corbett\AGAMOTTO\AGAMOTTO\AGAMOTTO Simulation\Assets\status.json"
+    terrain_status = ""
+    '''thread = run_async_in_thread(play_unity_scene_async(unity_exe, project_path, scene_path, batchmode=False))
+
+    while terrain_status != "Valid":
+        with open(terrain_reporting_path) as f:
+            data = json.load(f)
+            terrain_status = data["status"]
+            #print(terrain_status)'''
+
+    #print(terrain_status)
+    asyncio.run(start_server())
+
+
+
+
+asyncio.run(main())
