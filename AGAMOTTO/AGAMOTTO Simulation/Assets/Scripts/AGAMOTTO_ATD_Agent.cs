@@ -96,15 +96,16 @@ public class AGAMOTTO_ATD_Agent : RLAgent
     public void SetEpisodeSpawnSnapshots(IEnumerable<RideID> blueIds, IEnumerable<RideID> redIds)
     {
         ITransformSystem ts = api.GetSystem<ITransformSystem>();
-        IAgentSystem agentSystem = Globals.api.agentSystem;
 
         _friendlySpawnWorld = new List<(RideID, RideVector3)>();
         if (blueIds != null)
         {
+            var seen = new HashSet<(int, int)>();
             foreach (RideID id in blueIds)
             {
-                if (!IsValidRideId(id) || agentSystem.IsAgentDead(id))
+                if (!IsValidRideId(id) || !seen.Add((id.id, id.version)))
                     continue;
+                // Include dead units: episode reset revives before teleport; skipping dead dropped squads from the cache.
                 _friendlySpawnWorld.Add((id, ts.GetPosition(id)));
             }
         }
@@ -112,9 +113,10 @@ public class AGAMOTTO_ATD_Agent : RLAgent
         _enemySpawnWorld = new List<(RideID, RideVector3)>();
         if (redIds != null)
         {
+            var seen = new HashSet<(int, int)>();
             foreach (RideID id in redIds)
             {
-                if (!IsValidRideId(id) || agentSystem.IsAgentDead(id))
+                if (!IsValidRideId(id) || !seen.Add((id.id, id.version)))
                     continue;
                 _enemySpawnWorld.Add((id, ts.GetPosition(id)));
             }
