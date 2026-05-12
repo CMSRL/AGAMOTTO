@@ -22,6 +22,10 @@ public class AGAMOTTO_ATD_Agent : RLAgent
     public RideID m_squadTacticalGroup;
     public RideVector3 m_startingPosition;
     public RideVector3 m_enemyStartingPosition;
+    /// <summary>World spawn poses captured once at RL init; used to reset every Blue unit each episode.</summary>
+    List<(RideID id, RideVector3 world)> _friendlySpawnWorld;
+    /// <summary>World spawn poses for every Red agent at RL init; closest enemy remains <see cref="m_enemy"/> for rewards.</summary>
+    List<(RideID id, RideVector3 world)> _enemySpawnWorld;
     private Vector3 previousPosition;
     private int episodeCounter = 0;
     private const float MinMoveDirectionSqr = 1e-8f;
@@ -85,6 +89,54 @@ public class AGAMOTTO_ATD_Agent : RLAgent
         }
     }
 
+    /// <summary>
+    /// Called from <see cref="AGAMOTTO_RL_Behavior"/> after units exist. Stores every Blue/Red sim position so
+    /// <see cref="OnEpisodeBegin"/> can reset the full squads, not only the leader and closest enemy.
+    /// </summary>
+    public void SetEpisodeSpawnSnapshots(IEnumerable<RideID> blueIds, IEnumerable<RideID> redIds)
+    {
+        ITransformSystem ts = api.GetSystem<ITransformSystem>();
+        IAgentSystem agentSystem = Globals.api.agentSystem;
+
+        _friendlySpawnWorld = new List<(RideID, RideVector3)>();
+        if (blueIds != null)
+        {
+            foreach (RideID id in blueIds)
+            {
+                if (!IsValidRideId(id) || agentSystem.IsAgentDead(id))
+                    continue;
+                _friendlySpawnWorld.Add((id, ts.GetPosition(id)));
+            }
+        }
+
+        _enemySpawnWorld = new List<(RideID, RideVector3)>();
+        if (redIds != null)
+        {
+            foreach (RideID id in redIds)
+            {
+                if (!IsValidRideId(id) || agentSystem.IsAgentDead(id))
+                    continue;
+                _enemySpawnWorld.Add((id, ts.GetPosition(id)));
+            }
+        }
+    }
+
+    void TeleportTeamToSpawnWorld(IEnumerable<(RideID id, RideVector3 world)> spawns)
+    {
+        if (spawns == null)
+            return;
+        IMovementSystem movementSystem = api.movementSystem;
+        IAgentSystem agentSystem = Globals.api.agentSystem;
+        foreach (var pair in spawns)
+        {
+            if (!IsValidRideId(pair.id))
+                continue;
+            if (agentSystem.IsAgentDead(pair.id))
+                agentSystem.ReviveAgent(pair.id);
+            movementSystem.MoveTeleport(pair.id, pair.world);
+        }
+    }
+
     /// <summary>Leader world position from RIDE sim state (Unity transform can lag).</summary>
     Vector3 GetAgentWorldPosition()
     {
@@ -103,7 +155,21 @@ public class AGAMOTTO_ATD_Agent : RLAgent
 
         Debug.Log($"Episode reset, moving agent from {agentTransform.position} to start; enemy to {m_enemyStartingPosition}");
 
-        TeleportFriendlySquadPreservingFormation(m_startingPosition);
+        // Reset full squads to RL-init sim poses (leader-only + 50 m wedge filter misses distant friendlies;
+        // m_enemy is only one Red — other Reds never moved with the old path).
+        if (_friendlySpawnWorld != null && _friendlySpawnWorld.Count > 0)
+            TeleportTeamToSpawnWorld(_friendlySpawnWorld);
+        else
+            TeleportFriendlySquadPreservingFormation(m_startingPosition);
+
+        if (_enemySpawnWorld != null && _enemySpawnWorld.Count > 0)
+            TeleportTeamToSpawnWorld(_enemySpawnWorld);
+        else if (HasAssignedEnemy(m_enemy))
+        {
+            if (agentSystem.IsAgentDead(m_enemy))
+                agentSystem.ReviveAgent(m_enemy);
+            movementSystem.MoveTeleport(m_enemy, m_enemyStartingPosition);
+        }
 
         // Align reward / obs bookkeeping with simulation pose (not the ML-Agents Unity transform).
         previousPosition = GetAgentWorldPosition();
@@ -121,14 +187,8 @@ public class AGAMOTTO_ATD_Agent : RLAgent
             agentSystem.ReviveAgent(agent);
         }
 
-        // Reset enemy so a new episode does not begin with the enemy already dead (instant terminal success).
-        if (HasAssignedEnemy(m_enemy))
-        {
-            if (agentSystem.IsAgentDead(m_enemy))
-                agentSystem.ReviveAgent(m_enemy);
-            movementSystem.MoveTeleport(m_enemy, m_enemyStartingPosition);
-        }
-        else
+        // Enemy squad already reset above when _enemySpawnWorld is set; single-enemy fallback only if no snapshot.
+        if ((_enemySpawnWorld == null || _enemySpawnWorld.Count == 0) && !HasAssignedEnemy(m_enemy))
             Debug.LogWarning("AGAMOTTO_ATD_Agent: m_enemy is not assigned; skipping enemy reset.");
     }
 

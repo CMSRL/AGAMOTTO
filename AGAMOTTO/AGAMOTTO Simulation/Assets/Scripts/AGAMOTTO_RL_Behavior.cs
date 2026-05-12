@@ -60,6 +60,11 @@ public class AGAMOTTO_RL_Behavior : MLBehaviour
             IEnumerable<RideID> enemies = api.scenarioSystem.GetAgents(mlagent.agentTransform.position, maxEnemyDistance, team);
             if (!TryAssignClosestEnemy(mlagent, enemies))
                 Debug.LogError("AGAMOTTO_RL_Behavior: No enemies found after wait; cannot assign m_enemy.");
+
+            // Remember every Blue/Red spawn so each episode can reset full squads (not only leader + closest enemy).
+            IEnumerable<RideID> blues = api.scenarioSystem.GetAgents(Team.Blue);
+            IEnumerable<RideID> reds = api.scenarioSystem.GetAgents(Team.Red);
+            mlagent.SetEpisodeSpawnSnapshots(blues, reds);
         }
         catch (Exception ex)
         {
