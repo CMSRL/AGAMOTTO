@@ -18,12 +18,12 @@ public class AGAMOTTO_RL_Behavior : MLBehaviour
     /// <summary>
     /// Horizontal radius (meters) around the friendly leader used to decide which Blue agents belong to this squad for spawn snapshots.
     /// </summary>
-    public float friendlySquadSpawnCaptureRadiusM = 800f;
+    public float friendlySquadSpawnCaptureRadiusM = 2500f;
 
     /// <summary>
     /// Horizontal radius (meters) around the assigned enemy anchor used for Red spawn snapshots.
     /// </summary>
-    public float enemySquadSpawnCaptureRadiusM = 800f;
+    public float enemySquadSpawnCaptureRadiusM = 2500f;
 
     /// <summary>
     /// After the first spawn snapshot, wait this long (ms) and capture again so late-spawned units are included.
