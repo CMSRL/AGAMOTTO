@@ -432,9 +432,21 @@ namespace AGAMOTTO
                     case "h":
                         if (!entityList.ContainsKey(uid))
                         {
-                            RideID insurgents = Globals.api.agentSystem.CreateSquad(new UnitCreationParams(uid) { rows = 2, cols = 2, position = scenPos, rotation = RideQuaternion.Euler(0, 0, 0), team = Ride.Team.Red });
+                            // Opposing force: 5–6 dismounts in a single tactical group (not the previous 2×2 four-man squad).
+                            int hostileCount = UnityEngine.Random.Range(5, 7);
+                            int rows = hostileCount == 6 ? 2 : 1;
+                            int cols = hostileCount == 6 ? 3 : 5;
+                            RideID insurgents = Globals.api.agentSystem.CreateSquad(new UnitCreationParams(uid)
+                            {
+                                rows = rows,
+                                cols = cols,
+                                position = scenPos,
+                                rotation = RideQuaternion.Euler(0, 0, 0),
+                                team = Ride.Team.Red
+                            });
                             entityList.Add(uid, insurgents);
                             simulationState.State = SimStateType.Idle;
+                            Debug.Log($"AGAMOTTO: Red opposing team spawned count={hostileCount} grid={rows}×{cols} uid={uid}.");
                             return insurgents;
                         }
                         break;
