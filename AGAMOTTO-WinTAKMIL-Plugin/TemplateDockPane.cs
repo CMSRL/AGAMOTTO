@@ -413,7 +413,8 @@ namespace AGAMOTTO_WinTAK_Plugin
 
         private void AppendAssessment(string line)
         {
-            var text = $"[{DateTime.Now:T}] {line}";
+            var display = TrainingFeedbackFormatter.FormatForAssessment(line);
+            var text = $"[{DateTime.Now:T}] {display}";
             System.Windows.Application.Current?.Dispatcher?.Invoke(() => AssessmentLines.Add(text));
         }
 

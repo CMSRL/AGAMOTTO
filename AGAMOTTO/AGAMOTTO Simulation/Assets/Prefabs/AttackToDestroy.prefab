@@ -100,6 +100,9 @@ MonoBehaviour:
   m_enemy:
     id: 0
     version: 0
+  m_squadTacticalGroup:
+    id: 0
+    version: 0
   m_startingPosition:
     x: 0
     y: 0
@@ -108,6 +111,15 @@ MonoBehaviour:
     x: 0
     y: 0
     z: 0
+  observationMapRadiusM: 2500
+  observationHeightScaleM: 50
+  sendTrainingFeedbackToTak: 1
+  takFeedbackHost: 127.0.0.1
+  takFeedbackPort: 65433
+  rewardPerEnemySquadMemberKilled: 0.45
+  penaltyPerFriendlyWingmanDeath: 0.5
+  squadPathFormation: 3
+  squadFormationFallbackMaxHorizontalM: 25
 --- !u!114 &1589457156328992152
 MonoBehaviour:
   m_ObjectHideFlags: 0

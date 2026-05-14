@@ -436,7 +436,7 @@ namespace AGAMOTTO
                             int hostileCount = UnityEngine.Random.Range(5, 7);
                             int rows = hostileCount == 6 ? 2 : 1;
                             int cols = hostileCount == 6 ? 3 : 5;
-                            RideID insurgents = Globals.api.agentSystem.CreateSquad(new UnitCreationParams(uid)
+                            RideID insurgents = Globals.api.agentSystem.CreateFireTeam(new UnitCreationParams(uid)
                             {
                                 rows = rows,
                                 cols = cols,
