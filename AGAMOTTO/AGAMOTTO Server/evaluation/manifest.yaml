@@ -1,0 +1,56 @@
+# Scripted training + ablation matrix for AGAMOTTO Attack-to-Destroy (AGAMOTTO_RL).
+# Run: python evaluation_suite.py --paths evaluation/paths.local.yaml
+
+suite_name: agamotto_atd_eval_v1
+behavior_name: AGAMOTTO_RL
+
+# Shorter runs for suite iteration; override per experiment with max_steps if needed.
+default_max_steps: 80000
+default_scenario: atd_default
+
+scenarios:
+  atd_default:
+    friendly_lat: 35.331081
+    friendly_lon: -116.5210077
+    hostile_lat: 35.335081
+    hostile_lon: -116.5160077
+
+experiments:
+  - id: baseline_sac
+    description: Full SAC + curiosity + squad death shaping (eval step budget).
+    trainer_config: evaluation/configs/baseline_eval.yaml
+    run_id: baseline_sac
+    unity_overrides: {}
+
+  - id: ablation_no_curiosity
+    description: Extrinsic reward only (curiosity strength 0).
+    trainer_config: evaluation/configs/no_curiosity.yaml
+    run_id: ablation_no_curiosity
+    unity_overrides: {}
+
+  - id: ablation_lower_lr
+    description: Learning rate 1e-4 instead of 3e-4.
+    trainer_config: evaluation/configs/lower_lr.yaml
+    run_id: ablation_lower_lr
+    unity_overrides: {}
+
+  - id: ablation_shorter_horizon
+    description: time_horizon 256 vs 512.
+    trainer_config: evaluation/configs/shorter_horizon.yaml
+    run_id: ablation_shorter_horizon
+    unity_overrides: {}
+
+  - id: ablation_no_squad_rewards
+    description: Unity-side squad kill/death shaping disabled.
+    trainer_config: evaluation/configs/baseline_eval.yaml
+    run_id: ablation_no_squad_rewards
+    unity_overrides:
+      rewardPerEnemySquadMemberKilled: 0.0
+      penaltyPerFriendlyWingmanDeath: 0.0
+
+  - id: ablation_no_tak_feedback
+    description: WinTAK TCP training feedback disabled.
+    trainer_config: evaluation/configs/baseline_eval.yaml
+    run_id: ablation_no_tak_feedback
+    unity_overrides:
+      sendTrainingFeedbackToTak: false

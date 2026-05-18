@@ -3,7 +3,7 @@
 ## 1. Prerequisites
 
 ### Install Unity Editor
-- **Version:** `2022.3.13f1`
+- **Version:** `2022.3.62f3` (see `ProjectSettings/ProjectVersion.txt`)
 - **Modules:**
   - Android Build Support  
   - Windows Build Support
