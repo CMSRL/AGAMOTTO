@@ -1,0 +1,18 @@
+# Copy to paths.local.yaml and edit for your machine (paths.local.yaml is gitignored via *.local.yaml).
+
+# Optional — if omitted, resolved from ProjectSettings/ProjectVersion.txt (2022.3.62f3).
+unity_exe: "C:/Program Files/Unity/Hub/Editor/2022.3.62f3/Editor/Unity.exe"
+unity_project: "../AGAMOTTO Simulation"
+scene_path: "Assets/Scenes/BaseScene.unity"
+
+# ML-Agents CLI and base trainer YAML (SAC / AGAMOTTO_RL behavior).
+mlagents_learn: "mlagents-learn"
+trainer_config_base: "C:/Users/matthew.corbett/ml-agents/config/ppo/AGAMOTTO_RL_config.yaml"
+
+results_root: "evaluation/results"
+cot_host: "127.0.0.1"
+cot_port: 65432
+
+terrain_wait_timeout_s: 600
+spawn_delay_s: 2.0
+unity_startup_grace_s: 15.0

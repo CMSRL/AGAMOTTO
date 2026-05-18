@@ -8,6 +8,7 @@ using Ride.Movement;
 using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
+using Unity.MLAgents;
 using Unity.MLAgents.Actuators;
 using Unity.MLAgents.Sensors;
 using UnityEngine;
@@ -48,6 +49,11 @@ public class AGAMOTTO_ATD_Agent : RLAgent
 
     readonly HashSet<(int id, int version)> _enemyAlivePrevStep = new HashSet<(int, int)>();
     readonly HashSet<(int id, int version)> _friendlyAlivePrevStep = new HashSet<(int, int)>();
+
+    /// <summary>Tracked hostiles killed this episode (TensorBoard: AGAMOTTO/Enemies Killed Per Episode).</summary>
+    int _episodeEnemiesKilled;
+    /// <summary>Wingmen + RL leader deaths this episode (TensorBoard: AGAMOTTO/Friendlies Lost Per Episode).</summary>
+    int _episodeFriendliesLost;
 
     private Vector3 previousPosition;
     private int episodeCounter = 0;
@@ -364,6 +370,34 @@ public class AGAMOTTO_ATD_Agent : RLAgent
             Debug.LogWarning("AGAMOTTO_ATD_Agent: m_enemy is not assigned; skipping enemy reset.");
 
         RefreshSquadAliveBaselines(agentSystem);
+        ResetEpisodeKillCounters();
+    }
+
+    void ResetEpisodeKillCounters()
+    {
+        _episodeEnemiesKilled = 0;
+        _episodeFriendliesLost = 0;
+    }
+
+    /// <summary>Writes per-episode kill counts for <c>training_eval_summarize.py</c> / TensorBoard.</summary>
+    void RecordEpisodeKillStats()
+    {
+        if (Academy.Instance?.StatsRecorder == null)
+            return;
+        Academy.Instance.StatsRecorder.Add(
+            "AGAMOTTO/Enemies Killed Per Episode",
+            _episodeEnemiesKilled,
+            StatAggregationMethod.MostRecent);
+        Academy.Instance.StatsRecorder.Add(
+            "AGAMOTTO/Friendlies Lost Per Episode",
+            _episodeFriendliesLost,
+            StatAggregationMethod.MostRecent);
+    }
+
+    void EndEpisodeWithTrainingStats()
+    {
+        RecordEpisodeKillStats();
+        EndEpisode();
     }
 
     /// <summary>Resets per-episode tracking so squad death rewards only fire on transitions after spawn.</summary>
@@ -409,6 +443,7 @@ public class AGAMOTTO_ATD_Agent : RLAgent
                 if (!alivePrev || aliveNow)
                     continue;
                 bool isPrimary = HasAssignedEnemy(m_enemy) && SameRideId(id, m_enemy);
+                _episodeEnemiesKilled++;
                 if (isPrimary)
                     Debug.Log($"AGAMOTTO_ATD_Agent: Enemy (primary / mission target) killed id={id.id} v={id.version}.");
                 else
@@ -441,6 +476,7 @@ public class AGAMOTTO_ATD_Agent : RLAgent
                 bool alivePrev = _friendlyAlivePrevStep.Contains(AliveKey(id));
                 if (!alivePrev || aliveNow || isLeader)
                     continue;
+                _episodeFriendliesLost++;
                 if (penaltyPerFriendlyWingmanDeath != 0f)
                     AddReward(-penaltyPerFriendlyWingmanDeath);
                 Debug.Log($"AGAMOTTO_ATD_Agent: Friendly wingman killed id={id.id} v={id.version} penalty={penaltyPerFriendlyWingmanDeath}.");
@@ -557,18 +593,19 @@ public class AGAMOTTO_ATD_Agent : RLAgent
             NotifyTakTrainingOutcome(true, "primary_enemy_killed");
             DispatchTrainingResult(true);
             suppressStepPunishmentThisAction = true;
-            EndEpisode();
+            EndEpisodeWithTrainingStats();
             return;
         }
 
         if (agentSystem.IsAgentDead(agent))
         {
             Debug.Log($"AGAMOTTO_ATD_Agent: Episode failure — RL leader killed id={agent.id} v={agent.version}.");
+            _episodeFriendliesLost++;
             AddReward(-1 * m_successReward);
             NotifyTakTrainingOutcome(false, "leader_killed");
             DispatchTrainingResult(false);
             suppressStepPunishmentThisAction = true;
-            EndEpisode();
+            EndEpisodeWithTrainingStats();
             return;
         }
 
@@ -615,7 +652,7 @@ public class AGAMOTTO_ATD_Agent : RLAgent
             DispatchTrainingResult(false);
             Debug.Log($"Episode reset at step: {stepCount}");
             suppressStepPunishmentThisAction = true;
-            EndEpisode();
+            EndEpisodeWithTrainingStats();
             return;
         }
 

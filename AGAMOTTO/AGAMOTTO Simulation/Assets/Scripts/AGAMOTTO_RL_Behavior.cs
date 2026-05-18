@@ -61,6 +61,7 @@ public class AGAMOTTO_RL_Behavior : MLBehaviour
             AGAMOTTO_ATD_Agent mlagent = GetRLAgent<AGAMOTTO_ATD_Agent>();
             // Ensure RIDE id + Unity transform track the behaviour entity (squad leader), not the mission prefab root.
             mlagent.Init(api, entity);
+            AGAMOTTO_EvaluationRunConfig.TryApplyToAgent(mlagent);
             BehaviorParameters bp = mlagent.gameObject.GetComponent<BehaviorParameters>();
             bp.BehaviorName = "AGAMOTTO_RL";
             // Two squads → two ML-Agents teams for cooperative multi-squad training (same behavior name, shared policy file).
