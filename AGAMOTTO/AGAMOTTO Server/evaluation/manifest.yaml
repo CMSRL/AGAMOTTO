@@ -6,9 +6,20 @@ behavior_name: AGAMOTTO_RL
 
 # Shorter runs for suite iteration; override per experiment with max_steps if needed.
 default_max_steps: 80000
-default_scenario: atd_default
+# Automated tests use Unity_Data CoT (no WinTAK GUI). Synthetic atd_default still available.
+default_scenario: unity_data_atd
 
 scenarios:
+  unity_data_atd:
+    type: unity_data
+    cot_data_dir: Unity_Data
+    dispatch_mode: Training
+    inject_hostile_if_missing: true
+    hostile_lat: 35.335081
+    hostile_lon: -116.5160077
+    training_friendly_limit: 1
+    disable_tak_feedback: true
+
   atd_default:
     friendly_lat: 35.331081
     friendly_lon: -116.5210077
