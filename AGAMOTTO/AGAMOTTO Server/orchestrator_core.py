@@ -20,6 +20,29 @@ from XMLHelpers import parse_cot
 
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 65432
+# If 65432 fails on Windows (WinError 10013 / excluded range), try these in order.
+COT_PORT_FALLBACKS = (65432, 55032, 165432)
+
+
+def resolve_cot_port(explicit: Optional[int] = None) -> int:
+    if explicit is not None:
+        return int(explicit)
+    env = os.environ.get("AGAMOTTO_COT_PORT")
+    if env:
+        return int(env)
+    return DEFAULT_PORT
+
+
+def format_bind_error(host: str, port: int, ex: OSError) -> str:
+    return (
+        f"Cannot bind CoT server to {host}:{port}: {ex}\n"
+        "  • Close any other AGAMOTTO Orchestrator / evaluation_suite process.\n"
+        "  • In PowerShell: netstat -ano | findstr :{port}\n"
+        "  • Try another port: $env:AGAMOTTO_COT_PORT = \"55032\" "
+        "(set the same port in the WinTAK plugin Orchestrator field).\n"
+        "  • Check Windows excluded ports: "
+        "netsh int ipv4 show excludedportrange protocol=tcp"
+    ).format(port=port)
 
 
 def repo_root() -> Path:
@@ -235,27 +258,49 @@ def spawn_training_entities_from_scenario(
     delay_s: float = 1.0,
     streaming_root: Optional[Path] = None,
 ) -> None:
-    """Write entity XML to StreamingAssets and push over TCP so Unity creates units."""
+    """Write CoT XML to StreamingAssets and push over TCP so Unity creates units (no WinTAK)."""
+    entries = scenario.get("entities", [])
+    spawn_cot_entries(entries, host=host, port=port, delay_s=delay_s, streaming_root=streaming_root)
+
+
+def spawn_cot_entries(
+    entries: list,
+    host: str = DEFAULT_HOST,
+    port: int = DEFAULT_PORT,
+    delay_s: float = 1.0,
+    streaming_root: Optional[Path] = None,
+) -> None:
+    """Push a list of CoT spawn dicts (uid, cot_xml, kind) to Unity via TCP."""
     dirs = ensure_streaming_dirs(streaming_root)
-    for ent in scenario.get("entities", []):
+    for ent in entries:
         uid = ent["uid"]
-        xml_path = dirs["entities"] / f"{uid}.xml"
+        kind = ent.get("kind", "entity")
+        subdir = dirs["routes"] if kind == "route" else dirs["entities"]
+        xml_path = subdir / f"{uid}.xml"
         xml_path.write_text(ent["cot_xml"], encoding="utf-8")
         time.sleep(delay_s)
         send_cot_file(host, port, xml_path)
-        print(f"[orchestrator] spawned {ent.get('label', uid)} -> {host}:{port}")
+        print(f"[orchestrator] spawned {ent.get('label', uid)} ({kind}) -> {host}:{port}")
 
 
 class CotTcpServer:
     """Background CoT listener (same behavior as legacy AGAMOTTO Orchestrator start_server)."""
 
-    def __init__(self, host: str = DEFAULT_HOST, port: int = DEFAULT_PORT, streaming_root: Optional[Path] = None):
+    def __init__(
+        self,
+        host: str = DEFAULT_HOST,
+        port: Optional[int] = None,
+        streaming_root: Optional[Path] = None,
+        port_fallbacks: Optional[tuple] = None,
+    ):
         self.host = host
-        self.port = port
+        self.port = resolve_cot_port(port)
+        self._port_fallbacks = port_fallbacks or COT_PORT_FALLBACKS
         self.streaming_root = streaming_root
         self._entities: Dict[str, Dict[str, Any]] = {}
         self._thread: Optional[threading.Thread] = None
         self._stop = threading.Event()
+        self._listen_socket: Optional[socket.socket] = None
 
     def start(self) -> None:
         if self._thread and self._thread.is_alive():
@@ -266,27 +311,74 @@ class CotTcpServer:
 
     def stop(self) -> None:
         self._stop.set()
+        if self._listen_socket is not None:
+            try:
+                self._listen_socket.close()
+            except OSError:
+                pass
+            self._listen_socket = None
+
+    def _try_bind(self, host: str, port: int) -> socket.socket:
+        last_error: Optional[OSError] = None
+        for bind_host in (host, "0.0.0.0"):
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            try:
+                sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                sock.bind((bind_host, port))
+                sock.listen(8)
+                sock.settimeout(1.0)
+                if bind_host != host:
+                    print(f"[orchestrator] CoT bind fallback: listening on {bind_host}:{port}")
+                return sock
+            except OSError as ex:
+                last_error = ex
+                sock.close()
+        assert last_error is not None
+        raise last_error
+
+    def _open_listener(self) -> socket.socket:
+        ports = []
+        for p in (self.port, *self._port_fallbacks):
+            if p not in ports:
+                ports.append(p)
+        last_error: Optional[OSError] = None
+        for port in ports:
+            try:
+                sock = self._try_bind(self.host, port)
+                self.port = port
+                return sock
+            except OSError as ex:
+                last_error = ex
+                print(format_bind_error(self.host, port, ex))
+        assert last_error is not None
+        raise last_error
 
     def _run(self) -> None:
+        try:
+            self._listen_socket = self._open_listener()
+        except OSError:
+            return
+
+        print(f"[orchestrator] CoT server listening on {self.host}:{self.port}")
+        listen_sock = self._listen_socket
         while not self._stop.is_set():
             try:
-                with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-                    s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-                    s.settimeout(1.0)
-                    s.bind((self.host, self.port))
-                    s.listen(1)
-                    print(f"[orchestrator] CoT server listening on {self.host}:{self.port}")
-                    try:
-                        conn, addr = s.accept()
-                    except socket.timeout:
-                        continue
-                    with conn:
-                        print(f"[orchestrator] Connected by {addr}")
-                        self._handle_connection(conn)
+                conn, addr = listen_sock.accept()
+            except socket.timeout:
+                continue
             except OSError as ex:
                 if not self._stop.is_set():
-                    print(f"[orchestrator] CoT server error: {ex}")
+                    print(f"[orchestrator] CoT accept error: {ex}")
                     time.sleep(1.0)
+                continue
+            with conn:
+                print(f"[orchestrator] Connected by {addr}")
+                self._handle_connection(conn)
+        if listen_sock is not None:
+            try:
+                listen_sock.close()
+            except OSError:
+                pass
 
     def _handle_connection(self, conn: socket.socket) -> None:
         while not self._stop.is_set():

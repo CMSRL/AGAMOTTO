@@ -11,8 +11,12 @@ trainer_config_base: "C:/Users/matthew.corbett/ml-agents/config/ppo/AGAMOTTO_RL_
 
 results_root: "evaluation/results"
 cot_host: "127.0.0.1"
+# If bind fails with WinError 10013, set AGAMOTTO_COT_PORT=55032 (and WinTAK plugin port).
 cot_port: 65432
 
 terrain_wait_timeout_s: 600
 spawn_delay_s: 2.0
 unity_startup_grace_s: 15.0
+
+# Scripted tests: CoT captured from WinTAK exports (no GUI required at test time).
+unity_data_dir: Unity_Data

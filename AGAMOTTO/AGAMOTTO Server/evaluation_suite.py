@@ -13,12 +13,14 @@ Prerequisites:
   - Copy evaluation/paths.example.yaml -> evaluation/paths.local.yaml
   - ML-Agents Python env with mlagents-learn, tensorboard
   - Unity project opens BaseScene with ML-Agents Academy
+  - CoT fixtures in AGAMOTTO Server/Unity_Data (default scenario; WinTAK not required)
 
 Usage:
   cd "AGAMOTTO/AGAMOTTO Server"
   python evaluation_suite.py --paths evaluation/paths.local.yaml
   python evaluation_suite.py --only baseline_sac --dry-run
   python evaluation_suite.py --list
+  python run_unity_data_spawn.py   # spawn-only smoke test (no mlagents-learn)
 """
 
 from __future__ import annotations
@@ -44,6 +46,7 @@ SERVER_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(SERVER_DIR))
 
 from evaluation.cot_builder import default_atd_scenario  # noqa: E402
+from evaluation.unity_data_loader import scenario_from_manifest_config  # noqa: E402
 import orchestrator_core as oc  # noqa: E402
 
 
@@ -57,15 +60,31 @@ def resolve_path(base: Path, value: str) -> Path:
     return p if p.is_absolute() else (base / p).resolve()
 
 
-def build_scenario(manifest: Dict[str, Any], scenario_name: str) -> List[dict]:
+def build_scenario(
+    manifest: Dict[str, Any],
+    scenario_name: str,
+    server_base: Optional[Path] = None,
+) -> List[dict]:
     scenarios = manifest.get("scenarios") or {}
     cfg = scenarios.get(scenario_name) or scenarios.get(manifest.get("default_scenario", "atd_default"), {})
+    if cfg.get("type") == "unity_data":
+        return scenario_from_manifest_config(cfg, server_base or SERVER_DIR)
     return default_atd_scenario(
         friendly_lat=float(cfg.get("friendly_lat", 35.331081)),
         friendly_lon=float(cfg.get("friendly_lon", -116.5210077)),
         hostile_lat=float(cfg.get("hostile_lat", 35.335081)),
         hostile_lon=float(cfg.get("hostile_lon", -116.5160077)),
     )
+
+
+def scenario_test_overrides(manifest: Dict[str, Any], scenario_name: str) -> Dict[str, Any]:
+    """Extra Unity active_run.json flags for automated scenarios (e.g. no WinTAK feedback)."""
+    scenarios = manifest.get("scenarios") or {}
+    cfg = scenarios.get(scenario_name) or {}
+    overrides: Dict[str, Any] = {}
+    if cfg.get("disable_tak_feedback"):
+        overrides["sendTrainingFeedbackToTak"] = False
+    return overrides
 
 
 def unity_overrides_payload(exp: Dict[str, Any]) -> Dict[str, Any]:
@@ -177,13 +196,15 @@ def run_experiment(
         "started_at": datetime.now(timezone.utc).isoformat(),
     }
 
+    scenario_name = exp.get("scenario") or manifest.get("default_scenario", "atd_default")
     unity_payload = unity_overrides_payload(exp)
+    unity_payload.update(scenario_test_overrides(manifest, scenario_name))
     oc.write_active_run_config(unity_payload, streaming)
 
-    scenario_name = exp.get("scenario") or manifest.get("default_scenario", "atd_default")
-    entities = build_scenario(manifest, scenario_name)
+    entities = build_scenario(manifest, scenario_name, server_base)
     record["scenario"] = scenario_name
     record["unity_overrides"] = unity_payload
+    record["cot_sources"] = [e.get("source", e.get("label")) for e in entities]
 
     if dry_run:
         record["status"] = "dry_run"
