@@ -30,6 +30,9 @@ public class AGAMOTTO_RL_Behavior : MLBehaviour
     /// </summary>
     public int delayedSpawnSnapshotMs = 500;
 
+    const int MaxFriendlySnapshotAgents = 10;
+    const int MaxHostileSnapshotAgents = 7;
+
     /// <summary>
     /// Poll interval while waiting for at least one enemy (milliseconds).
     /// </summary>
@@ -59,6 +62,15 @@ public class AGAMOTTO_RL_Behavior : MLBehaviour
         {
             base.InitMLBehaviour();
             AGAMOTTO_ATD_Agent mlagent = GetRLAgent<AGAMOTTO_ATD_Agent>();
+            Team leaderTeam = api.agentSystem.GetAgentTeam(entity);
+            if (leaderTeam != Team.Blue)
+            {
+                Debug.LogError(
+                    $"AGAMOTTO_RL_Behavior: ML-Agents policy is on team {leaderTeam}, expected Blue (friendly). "
+                    + "Check CoT types (a-f-* friendly, a-h-* hostile) and active_run trainingFriendlyLimit.");
+                Globals.api.agentSystem.SetAgentBehaviour(entity, null);
+                return;
+            }
             // Ensure RIDE id + Unity transform track the behaviour entity (squad leader), not the mission prefab root.
             mlagent.Init(api, entity);
             AGAMOTTO_EvaluationRunConfig.TryApplyToAgent(mlagent);
@@ -85,12 +97,18 @@ public class AGAMOTTO_RL_Behavior : MLBehaviour
             if (!TryAssignClosestEnemy(mlagent, enemies))
                 Debug.LogError("AGAMOTTO_RL_Behavior: No enemies found after wait; cannot assign m_enemy.");
 
-            ApplyEpisodeSpawnSnapshots(mlagent);
+            CaptureAndReplaceSpawnSnapshots(mlagent);
             if (delayedSpawnSnapshotMs > 0)
             {
                 await Task.Delay(delayedSpawnSnapshotMs);
-                ApplyEpisodeSpawnSnapshots(mlagent);
+                CaptureAndMergeSpawnSnapshots(mlagent);
             }
+
+            mlagent.TryLockEpisodeSpawnAnchors();
+            mlagent.EnableRlCombatEngagement();
+            Debug.Log(
+                $"AGAMOTTO_RL_Behavior: RL ready — teleport={!mlagent.useSquadNavMeshPaths}, "
+                + $"combat=Auto_Attack+Acquire_Targets.");
         }
         catch (Exception ex)
         {
@@ -98,13 +116,19 @@ public class AGAMOTTO_RL_Behavior : MLBehaviour
         }
     }
 
-    void ApplyEpisodeSpawnSnapshots(AGAMOTTO_ATD_Agent mlagent)
+    void CaptureAndReplaceSpawnSnapshots(AGAMOTTO_ATD_Agent mlagent)
     {
-        Team friendly = api.agentSystem.GetAgentTeam(entity);
-        Team hostile = friendly == Team.Blue ? Team.Red : Team.Blue;
-        List<RideID> friendlies = CollectSquadAgentsNear(entity, friendly, friendlySquadSpawnCaptureRadiusM);
-        List<RideID> hostiles = CollectEnemySquadNearAnchor(mlagent, hostile, enemySquadSpawnCaptureRadiusM);
+        List<RideID> friendlies = CollectSquadAgentsNear(entity, Team.Blue, friendlySquadSpawnCaptureRadiusM);
+        List<RideID> hostiles = CollectEnemySquadNearAnchor(mlagent, Team.Red, enemySquadSpawnCaptureRadiusM);
+        mlagent.ReplaceEpisodeSpawnSnapshots(friendlies, hostiles);
+    }
+
+    void CaptureAndMergeSpawnSnapshots(AGAMOTTO_ATD_Agent mlagent)
+    {
+        List<RideID> friendlies = CollectSquadAgentsNear(entity, Team.Blue, friendlySquadSpawnCaptureRadiusM);
+        List<RideID> hostiles = CollectEnemySquadNearAnchor(mlagent, Team.Red, enemySquadSpawnCaptureRadiusM);
         mlagent.SetEpisodeSpawnSnapshots(friendlies, hostiles);
+        mlagent.TryLockEpisodeSpawnAnchors();
     }
 
     /// <summary>
@@ -118,12 +142,12 @@ public class AGAMOTTO_RL_Behavior : MLBehaviour
         var anchor = new Vector3((float)anchorRv.x, (float)anchorRv.y, (float)anchorRv.z);
         float r2 = horizontalRadiusM * horizontalRadiusM;
 
-        var seen = new HashSet<(int, int)>();
+        var seen = new HashSet<int>();
         var result = new List<RideID>();
 
         void TryAdd(RideID id)
         {
-            if (!AGAMOTTO_ATD_Agent.IsValidRideId(id) || !seen.Add((id.id, id.version)))
+            if (!AGAMOTTO_ATD_Agent.IsValidRideId(id) || !seen.Add(id.id))
                 return;
             RideVector3 p = ts.GetPosition(id);
             float hdx = (float)(p.x - anchorRv.x);
@@ -132,6 +156,8 @@ public class AGAMOTTO_RL_Behavior : MLBehaviour
                 return;
             result.Add(id);
         }
+
+        TryAdd(leaderEntity);
 
         IEnumerable<RideID> spatial = ss.GetAgents(anchor, horizontalRadiusM, team);
         if (spatial != null)
@@ -147,6 +173,8 @@ public class AGAMOTTO_RL_Behavior : MLBehaviour
                 TryAdd(id);
         }
 
+        if (result.Count > MaxFriendlySnapshotAgents)
+            return result.GetRange(0, MaxFriendlySnapshotAgents);
         return result;
     }
 
@@ -194,6 +222,8 @@ public class AGAMOTTO_RL_Behavior : MLBehaviour
                 TryAdd(id);
         }
 
+        if (result.Count > MaxHostileSnapshotAgents)
+            return result.GetRange(0, MaxHostileSnapshotAgents);
         return result;
     }
 

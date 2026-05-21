@@ -9,6 +9,8 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import re
+import subprocess
 import socket
 import threading
 import time
@@ -182,6 +184,8 @@ async def play_unity_scene_async(
     scene_path: Optional[str] = None,
     batchmode: bool = False,
     extra_args: Optional[list] = None,
+    *,
+    minimal_logs: bool = False,
 ) -> int:
     cmd = [
         unity_exe,
@@ -205,8 +209,107 @@ async def play_unity_scene_async(
         stderr=asyncio.subprocess.STDOUT,
     )
     async for line in process.stdout:
-        print(line.decode(errors="replace").strip())
+        text = line.decode(errors="replace").rstrip("\r\n")
+        if minimal_logs:
+            text = _collapse_whitespace(text)
+            if not should_emit_unity_log_line(text):
+                continue
+        print(f"[unity] {text}", flush=True)
     return await process.wait()
+
+
+_UNITY_NOISE_MARKERS = (
+    "unityengine.",
+    "unityeditor.",
+    " (at ",
+    "setupcoroutine",
+    "invokemovenext",
+    "tick tree",
+    "assetdatabase.",
+    "garbagecollector",
+    "used heap",
+    "[physx]",
+    "shader ",
+    "d3d12:",
+    "compute shader",
+    "gi: ",
+    "licensing::",
+)
+
+_UNITY_SUPPRESS_MARKERS = (
+    "calculatepath failed",
+    "calculate path failed",
+)
+
+_UNITY_KEEP_MARKERS = (
+    "agamotto",
+    "[exportdata]",
+    "ml-agents",
+    "mlagents",
+    "academy",
+    "terrain",
+    "navmesh",
+    "cot",
+    "spawn",
+    "episode",
+    "error",
+    "warning",
+    "exception",
+    "failed",
+    "valid",
+    "enemy",
+    "squad",
+    "connect",
+    "behavior",
+)
+
+
+def _collapse_whitespace(text: str) -> str:
+    return " ".join(text.split())
+
+
+def should_emit_unity_log_line(line: str) -> bool:
+    """Keep high-signal Unity lines when unity_log_minimal is enabled."""
+    s = _collapse_whitespace(line)
+    if not s:
+        return False
+    low = s.lower()
+    if any(m in low for m in _UNITY_SUPPRESS_MARKERS):
+        return False
+    if re.search(r"\b(error|exception|assertion failed)\b", low):
+        if "unityengine.debug:logerror" in low or " (at " in low:
+            return False
+        return True
+    if any(n in low for n in _UNITY_NOISE_MARKERS):
+        return False
+    if any(k in low for k in _UNITY_KEEP_MARKERS):
+        return True
+    if re.match(r"^[\w.]+:\w+\(.*\)$", s):
+        return False
+    return False
+
+
+def _stream_subprocess_output(
+    proc: subprocess.Popen,
+    prefix: str,
+    *,
+    line_filter: Optional[Callable[[str], bool]] = None,
+    collapse: bool = False,
+) -> threading.Thread:
+    def _reader() -> None:
+        if proc.stdout is None:
+            return
+        for raw in proc.stdout:
+            line = raw.rstrip("\r\n")
+            if collapse:
+                line = _collapse_whitespace(line)
+            if line_filter is not None and not line_filter(line):
+                continue
+            print(f"{prefix}{line}", flush=True)
+
+    t = threading.Thread(target=_reader, daemon=True)
+    t.start()
+    return t
 
 
 def run_async_in_thread(coro) -> threading.Thread:
@@ -263,24 +366,72 @@ def spawn_training_entities_from_scenario(
     spawn_cot_entries(entries, host=host, port=port, delay_s=delay_s, streaming_root=streaming_root)
 
 
+def prune_streaming_entity_files(
+    streaming_root: Optional[Path],
+    keep_paths: list,
+) -> int:
+    """Remove extra entity XML under StreamingAssets/entities so Unity only sees intended CoT."""
+    dirs = ensure_streaming_dirs(streaming_root)
+    keep = {Path(p).resolve() for p in keep_paths if p}
+    removed = 0
+    for path in dirs["entities"].glob("*.xml"):
+        if path.resolve() in keep:
+            continue
+        path.unlink()
+        removed += 1
+        print(f"[orchestrator] pruned extra entity CoT: {path.name}")
+    return removed
+
+
 def spawn_cot_entries(
     entries: list,
     host: str = DEFAULT_HOST,
     port: int = DEFAULT_PORT,
     delay_s: float = 1.0,
     streaming_root: Optional[Path] = None,
+    *,
+    replay_in_place: bool = False,
+    send_tcp: bool = True,
+    persist_tcp_to_streaming: bool = True,
+    prune_extra_entities: bool = False,
 ) -> None:
-    """Push a list of CoT spawn dicts (uid, cot_xml, kind) to Unity via TCP."""
+    """Push CoT spawn dicts to Unity.
+
+    When replay_in_place is True, rewrite the existing source XML paths only (no new uid.xml files).
+    Unity's FileSystemWatcher picks up the change and spawns one squad per message.
+    """
     dirs = ensure_streaming_dirs(streaming_root)
+    if prune_extra_entities:
+        prune_streaming_entity_files(streaming_root, [e.get("source") for e in entries])
+
     for ent in entries:
         uid = ent["uid"]
         kind = ent.get("kind", "entity")
-        subdir = dirs["routes"] if kind == "route" else dirs["entities"]
-        xml_path = subdir / f"{uid}.xml"
-        xml_path.write_text(ent["cot_xml"], encoding="utf-8")
+        source = ent.get("source")
+        cot_xml = ent["cot_xml"]
+
+        if replay_in_place and source:
+            xml_path = Path(source)
+            if not xml_path.is_absolute():
+                xml_path = (dirs["entities"] / xml_path.name).resolve()
+        else:
+            subdir = dirs["routes"] if kind == "route" else dirs["entities"]
+            xml_path = subdir / f"{uid}.xml"
+
+        xml_path.parent.mkdir(parents=True, exist_ok=True)
+        xml_path.write_text(cot_xml, encoding="utf-8")
         time.sleep(delay_s)
-        send_cot_file(host, port, xml_path)
-        print(f"[orchestrator] spawned {ent.get('label', uid)} ({kind}) -> {host}:{port}")
+
+        if send_tcp:
+            send_cot_payload(host, port, cot_xml)
+        print(
+            f"[orchestrator] spawned {ent.get('label', uid)} ({kind}) "
+            f"-> {xml_path.name}"
+            + (f" (+TCP {host}:{port})" if send_tcp else "")
+        )
+
+        if send_tcp and not persist_tcp_to_streaming:
+            pass  # payload sent; CotTcpServer should not duplicate-save (see persist_streaming_files)
 
 
 class CotTcpServer:
@@ -292,11 +443,13 @@ class CotTcpServer:
         port: Optional[int] = None,
         streaming_root: Optional[Path] = None,
         port_fallbacks: Optional[tuple] = None,
+        persist_streaming_files: bool = True,
     ):
         self.host = host
         self.port = resolve_cot_port(port)
         self._port_fallbacks = port_fallbacks or COT_PORT_FALLBACKS
         self.streaming_root = streaming_root
+        self.persist_streaming_files = persist_streaming_files
         self._entities: Dict[str, Dict[str, Any]] = {}
         self._thread: Optional[threading.Thread] = None
         self._stop = threading.Event()
@@ -400,11 +553,13 @@ class CotTcpServer:
                 contact = raw_xml.find(".//contact")
                 if contact is not None and linked_uid:
                     contact.set("callsign", linked_uid)
-                save_xml("route", route_uid, raw_xml, self.streaming_root)
+                if self.persist_streaming_files:
+                    save_xml("route", route_uid, raw_xml, self.streaming_root)
             else:
                 entity_uid = parsed.get("uid") or "entity-unknown"
                 raw_xml = ET.fromstring(data)
-                save_xml("entity", entity_uid, raw_xml, self.streaming_root)
+                if self.persist_streaming_files:
+                    save_xml("entity", entity_uid, raw_xml, self.streaming_root)
                 uid, lat, lon = parsed.get("uid"), parsed.get("lat"), parsed.get("lon")
                 if uid is not None and lat is not None and lon is not None:
                     self._entities[uid] = {
@@ -415,12 +570,95 @@ class CotTcpServer:
                     }
 
 
+def build_unity_play_command(
+    unity_exe: str,
+    project_path: str,
+    scene_path: Optional[str] = None,
+    batchmode: bool = False,
+    extra_args: Optional[list] = None,
+) -> list:
+    cmd = [
+        unity_exe,
+        "-projectPath",
+        project_path,
+        "-executeMethod",
+        "PlaySceneCommand.PlayScene",
+        "-logFile",
+        "-",
+    ]
+    if scene_path:
+        cmd += ["-scenePath", scene_path]
+    if batchmode:
+        cmd += ["-batchmode", "-nographics"]
+    if extra_args:
+        cmd += extra_args
+    return cmd
+
+
 def launch_unity_play_mode(
     unity_exe: str,
     project_path: str,
     scene_path: str,
     batchmode: bool = False,
+    minimal_logs: bool = False,
 ) -> threading.Thread:
     return run_async_in_thread(
-        play_unity_scene_async(unity_exe, project_path, scene_path, batchmode=batchmode)
+        play_unity_scene_async(
+            unity_exe,
+            project_path,
+            scene_path,
+            batchmode=batchmode,
+            minimal_logs=minimal_logs,
+        )
     )
+
+
+def launch_unity_play_mode_process(
+    unity_exe: str,
+    project_path: str,
+    scene_path: str,
+    batchmode: bool = False,
+    minimal_logs: bool = False,
+) -> subprocess.Popen:
+    """Start Unity and return the process handle so callers can shut it down after training."""
+    cmd = build_unity_play_command(unity_exe, project_path, scene_path, batchmode=batchmode)
+    proc = subprocess.Popen(
+        cmd,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    )
+    line_filter = should_emit_unity_log_line if minimal_logs else None
+    _stream_subprocess_output(
+        proc,
+        "[unity] ",
+        line_filter=line_filter,
+        collapse=minimal_logs,
+    )
+    return proc
+
+
+def shutdown_unity_process(
+    proc: Optional[subprocess.Popen],
+    *,
+    timeout_s: float = 25.0,
+    label: str = "Unity",
+) -> None:
+    if proc is None:
+        return
+    if proc.poll() is not None:
+        return
+    print(f"[eval] Closing {label} (pid={proc.pid})...", flush=True)
+    proc.terminate()
+    try:
+        proc.wait(timeout=timeout_s)
+        print(f"[eval] {label} exited (code={proc.returncode})", flush=True)
+    except subprocess.TimeoutExpired:
+        print(f"[eval] {label} did not exit in {timeout_s}s; killing...", flush=True)
+        proc.kill()
+        try:
+            proc.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            pass

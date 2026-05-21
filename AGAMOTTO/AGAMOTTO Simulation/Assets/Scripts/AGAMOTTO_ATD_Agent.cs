@@ -88,10 +88,23 @@ public class AGAMOTTO_ATD_Agent : RLAgent
     }
 
     [Header("Squad movement")]
-    [Tooltip("Formation used with MoveGroupPath when moving the friendly tactical group during RL.")]
+    [Tooltip("When false (eval default), squad moves via teleport each RL step. When true, uses MoveGroupPath (often fails off-mesh).")]
+    public bool useSquadNavMeshPaths = false;
+    [Tooltip("Formation used with MoveGroupPath when useSquadNavMeshPaths is enabled.")]
     public FormationProcedureType squadPathFormation = FormationProcedureType.Wedge;
     [Tooltip("When no RL spawn snapshot exists, include same-team agents within this horizontal distance (m) of the leader for formation teleport.")]
     public float squadFormationFallbackMaxHorizontalM = 800f;
+    [Tooltip("Max horizontal distance (m) between friendly squad members on each teleport step.")]
+    public float squadMaxMemberSpacingM = 20f;
+
+    [Header("Episode reset")]
+    [Tooltip("Steps after episode reset where leader-death terminal and squad death rewards are suppressed (avoids spawn crossfire).")]
+    public int combatTerminalWarmupSteps = 12;
+    List<(RideID id, RideVector3 world)> _lockedFriendlySpawnWorld;
+    List<(RideID id, RideVector3 world)> _lockedEnemySpawnWorld;
+    /// <summary>Wingman horizontal offsets from leader (m), keyed by entity id; capped to <see cref="squadMaxMemberSpacingM"/>.</summary>
+    List<(int entityId, double offsetX, double offsetY, double offsetZ)> _friendlySquadOffsets;
+    bool _loggedSquadMoveThisEpisode;
 
     /// <summary>
     /// Issues a short leader path for the whole friendly tactical group via <see cref="IMovementSystem.MoveGroupPath"/> (RIDE grouped pathing).
@@ -113,99 +126,297 @@ public class AGAMOTTO_ATD_Agent : RLAgent
         TeleportFriendlySquadPreservingFormation(leaderDestination);
     }
 
+    static int EntityIdKey(RideID id) => id.id;
+
+    void BuildFriendlySquadOffsetsFromSpawns()
+    {
+        _friendlySquadOffsets = new List<(int, double, double, double)>();
+        var spawns = _lockedFriendlySpawnWorld ?? _friendlySpawnWorld;
+        if (spawns == null || spawns.Count == 0)
+            return;
+
+        RideVector3 leaderWorld = api.GetSystem<ITransformSystem>().GetPosition(agent);
+        foreach (var pair in spawns)
+        {
+            if (SameRideEntityId(pair.id, agent))
+            {
+                leaderWorld = pair.world;
+                break;
+            }
+        }
+
+        foreach (var pair in spawns)
+        {
+            if (!IsValidRideId(pair.id) || SameRideEntityId(pair.id, agent))
+                continue;
+            _friendlySquadOffsets.Add((
+                EntityIdKey(pair.id),
+                pair.world.x - leaderWorld.x,
+                pair.world.y - leaderWorld.y,
+                pair.world.z - leaderWorld.z));
+        }
+
+        EnforceMaxSquadSpacing(_friendlySquadOffsets, Mathf.Max(squadMaxMemberSpacingM, 1f));
+    }
+
+    static void EnforceMaxSquadSpacing(
+        List<(int entityId, double offsetX, double offsetY, double offsetZ)> offsets,
+        float maxM)
+    {
+        if (offsets == null || offsets.Count == 0)
+            return;
+
+        for (int pass = 0; pass < 12; pass++)
+        {
+            bool changed = false;
+            for (int i = 0; i < offsets.Count; i++)
+            {
+                var a = offsets[i];
+                double ax = a.offsetX;
+                double az = a.offsetZ;
+                double distLeader = System.Math.Sqrt(ax * ax + az * az);
+                if (distLeader > maxM)
+                {
+                    double scale = maxM / distLeader;
+                    offsets[i] = (a.entityId, ax * scale, a.offsetY, az * scale);
+                    changed = true;
+                }
+
+                for (int j = i + 1; j < offsets.Count; j++)
+                {
+                    var b = offsets[j];
+                    double dx = b.offsetX - offsets[i].offsetX;
+                    double dz = b.offsetZ - offsets[i].offsetZ;
+                    double dist = System.Math.Sqrt(dx * dx + dz * dz);
+                    if (dist <= maxM || dist < 1e-3)
+                        continue;
+                    double scale = maxM / dist;
+                    var ai = offsets[i];
+                    var bj = offsets[j];
+                    double midX = (ai.offsetX + bj.offsetX) * 0.5;
+                    double midZ = (ai.offsetZ + bj.offsetZ) * 0.5;
+                    double halfDx = dx * 0.5 * scale;
+                    double halfDz = dz * 0.5 * scale;
+                    offsets[i] = (ai.entityId, midX - halfDx, ai.offsetY, midZ - halfDz);
+                    offsets[j] = (bj.entityId, midX + halfDx, bj.offsetY, midZ + halfDz);
+                    changed = true;
+                }
+            }
+
+            if (!changed)
+                break;
+        }
+    }
+
+    RideVector3 WingmanDestinationFromOffset(
+        RideVector3 leaderDestination,
+        int entityId,
+        RideVector3 fallbackSpawnWorld)
+    {
+        if (_friendlySquadOffsets != null)
+        {
+            foreach (var o in _friendlySquadOffsets)
+            {
+                if (o.entityId != entityId)
+                    continue;
+                return new RideVector3(
+                    (float)(leaderDestination.x + o.offsetX),
+                    (float)(leaderDestination.y + o.offsetY),
+                    (float)(leaderDestination.z + o.offsetZ));
+            }
+        }
+
+        RideVector3 leaderSpawn = m_startingPosition;
+        var friendlySpawns = FriendlySpawnsForReset();
+        if (friendlySpawns != null)
+        {
+            foreach (var pair in friendlySpawns)
+            {
+                if (SameRideEntityId(pair.id, agent))
+                {
+                    leaderSpawn = pair.world;
+                    break;
+                }
+            }
+        }
+
+        return new RideVector3(
+            (float)(leaderDestination.x + (fallbackSpawnWorld.x - leaderSpawn.x)),
+            (float)(leaderDestination.y + (fallbackSpawnWorld.y - leaderSpawn.y)),
+            (float)(leaderDestination.z + (fallbackSpawnWorld.z - leaderSpawn.z)));
+    }
+
     /// <summary>
-    /// Episode reset / fallback only: teleports the RL friendly squad with the leader (same world delta).
-    /// In-episode control uses <see cref="IssueFriendlySquadLeaderStepPath"/> instead.
+    /// Teleports the RL leader and every friendly using locked formation offsets (≤ squadMaxMemberSpacingM apart).
     /// </summary>
     void TeleportFriendlySquadPreservingFormation(RideVector3 leaderDestination)
     {
         ITransformSystem transformSystem = api.GetSystem<ITransformSystem>();
         IMovementSystem movementSystem = api.movementSystem;
         IAgentSystem agentSystem = Globals.api.agentSystem;
+        const Team friendlyTeam = Team.Blue;
 
-        RideVector3 leaderFrom = transformSystem.GetPosition(agent);
-        double dx = leaderDestination.x - leaderFrom.x;
-        double dy = leaderDestination.y - leaderFrom.y;
-        double dz = leaderDestination.z - leaderFrom.z;
+        if (agentSystem.GetAgentTeam(agent) != friendlyTeam)
+        {
+            Debug.LogError(
+                $"AGAMOTTO_ATD_Agent: Refusing squad teleport — RL agent team is "
+                + $"{agentSystem.GetAgentTeam(agent)}, expected {friendlyTeam}.");
+            return;
+        }
+
+        if (_friendlySquadOffsets == null || _friendlySquadOffsets.Count == 0)
+            BuildFriendlySquadOffsetsFromSpawns();
+
+        int moved = 0;
 
         void TeleportIfAlive(RideID id, RideVector3 dest)
         {
             if (!IsValidRideId(id))
                 return;
+            if (agentSystem.GetAgentTeam(id) != friendlyTeam)
+                return;
             if (agentSystem.IsAgentDead(id))
                 return;
             movementSystem.MoveTeleport(id, dest);
+            moved++;
         }
 
-        // Prefer tracked RL squad (same IDs as episode reset) so wingmen always move with the leader.
-        if (_friendlySpawnWorld != null && _friendlySpawnWorld.Count > 0)
-        {
-            TeleportIfAlive(agent, leaderDestination);
+        TeleportIfAlive(agent, leaderDestination);
 
-            foreach (var pair in _friendlySpawnWorld)
+        var friendlySpawns = FriendlySpawnsForReset();
+        if (friendlySpawns != null)
+        {
+            foreach (var pair in friendlySpawns)
             {
                 if (!IsValidRideId(pair.id) || SameRideEntityId(pair.id, agent))
                     continue;
-                RideVector3 p = transformSystem.GetPosition(pair.id);
-                RideVector3 dest = new RideVector3(
-                    (float)(p.x + dx),
-                    (float)(p.y + dy),
-                    (float)(p.z + dz));
+                RideVector3 dest = WingmanDestinationFromOffset(
+                    leaderDestination,
+                    EntityIdKey(pair.id),
+                    pair.world);
                 TeleportIfAlive(pair.id, dest);
             }
-
-            return;
         }
-
-        float maxR = Mathf.Max(squadFormationFallbackMaxHorizontalM, 1f);
-        float maxSq = maxR * maxR;
-        Team friendTeam = agentSystem.GetAgentTeam(agent);
-        IEnumerable<RideID> mates = api.scenarioSystem.GetAgents(friendTeam);
-        if (mates == null)
+        else
         {
-            movementSystem.MoveTeleport(agent, leaderDestination);
-            return;
-        }
-
-        foreach (RideID id in mates)
-        {
-            if (!IsValidRideId(id))
-                continue;
-            if (agentSystem.IsAgentDead(id))
-                continue;
-
-            RideVector3 p = transformSystem.GetPosition(id);
-            bool isLeader = SameRideEntityId(id, agent);
-            if (!isLeader)
+            float maxR = Mathf.Max(squadFormationFallbackMaxHorizontalM, 1f);
+            float maxSq = maxR * maxR;
+            RideVector3 leaderFrom = transformSystem.GetPosition(agent);
+            IEnumerable<RideID> mates = api.scenarioSystem.GetAgents(friendlyTeam);
+            if (mates != null)
             {
-                float hdx = (float)(p.x - leaderFrom.x);
-                float hdz = (float)(p.z - leaderFrom.z);
-                if (hdx * hdx + hdz * hdz > maxSq)
-                    continue;
+                foreach (RideID id in mates)
+                {
+                    if (!IsValidRideId(id) || SameRideEntityId(id, agent))
+                        continue;
+                    RideVector3 p = transformSystem.GetPosition(id);
+                    float hdx = (float)(p.x - leaderFrom.x);
+                    float hdz = (float)(p.z - leaderFrom.z);
+                    if (hdx * hdx + hdz * hdz > maxSq)
+                        continue;
+                    RideVector3 dest = WingmanDestinationFromOffset(
+                        leaderDestination,
+                        EntityIdKey(id),
+                        p);
+                    TeleportIfAlive(id, dest);
+                }
             }
+        }
 
-            RideVector3 dest = new RideVector3(
-                (float)(p.x + dx),
-                (float)(p.y + dy),
-                (float)(p.z + dz));
-            movementSystem.MoveTeleport(id, dest);
+        if (!_loggedSquadMoveThisEpisode && moved > 1)
+        {
+            _loggedSquadMoveThisEpisode = true;
+            Debug.Log(
+                $"AGAMOTTO_ATD_Agent: Squad moved together (teleport): {moved} live friendlies "
+                + $"(max spacing={squadMaxMemberSpacingM:F0}m).");
         }
     }
 
+    /// <summary>Replaces spawn caches (used when RL init captures squads).</summary>
+    public void ReplaceEpisodeSpawnSnapshots(IEnumerable<RideID> friendlyIds, IEnumerable<RideID> hostileIds)
+    {
+        ITransformSystem ts = api.GetSystem<ITransformSystem>();
+        _friendlySpawnWorld = BuildSpawnSnapshot(friendlyIds, ts);
+        _enemySpawnWorld = BuildSpawnSnapshot(hostileIds, ts);
+        BuildFriendlySquadOffsetsFromSpawns();
+        Debug.Log(
+            $"AGAMOTTO_ATD_Agent: Spawn snapshot replace → {_friendlySpawnWorld.Count} friendlies, "
+            + $"{_enemySpawnWorld.Count} hostiles.");
+    }
+
     /// <summary>
-    /// Called from <see cref="AGAMOTTO_RL_Behavior"/> after units exist. Merges sim positions into spawn caches so
-    /// later snapshots (e.g. delayed) add units without dropping IDs from an earlier pass.
-    /// <see cref="OnEpisodeBegin"/> uses these to reset full squads.
+    /// Merges sim positions into spawn caches (delayed capture pass).
+    /// <see cref="OnEpisodeBegin"/> uses locked anchors when <see cref="TryLockEpisodeSpawnAnchors"/> succeeded.
     /// </summary>
     public void SetEpisodeSpawnSnapshots(IEnumerable<RideID> friendlyIds, IEnumerable<RideID> hostileIds)
     {
         ITransformSystem ts = api.GetSystem<ITransformSystem>();
-
         _friendlySpawnWorld = MergeSpawnSnapshot(_friendlySpawnWorld, friendlyIds, ts);
         _enemySpawnWorld = MergeSpawnSnapshot(_enemySpawnWorld, hostileIds, ts);
-
-        Debug.Log($"AGAMOTTO_ATD_Agent: Spawn snapshot merge → {_friendlySpawnWorld.Count} friendlies, {_enemySpawnWorld.Count} hostiles tracked.");
+        Debug.Log(
+            $"AGAMOTTO_ATD_Agent: Spawn snapshot merge → {_friendlySpawnWorld.Count} friendlies, "
+            + $"{_enemySpawnWorld.Count} hostiles tracked.");
     }
+
+    /// <summary>Freeze RL-init poses so episode reset does not drift from live positions.</summary>
+    public void TryLockEpisodeSpawnAnchors()
+    {
+        if (_lockedFriendlySpawnWorld != null && _lockedEnemySpawnWorld != null)
+            return;
+        if (_friendlySpawnWorld == null || _friendlySpawnWorld.Count < 4)
+            return;
+        if (_enemySpawnWorld == null || _enemySpawnWorld.Count < 1)
+            return;
+
+        _lockedFriendlySpawnWorld = CloneSpawnList(_friendlySpawnWorld);
+        _lockedEnemySpawnWorld = CloneSpawnList(_enemySpawnWorld);
+        BuildFriendlySquadOffsetsFromSpawns();
+        Debug.Log(
+            $"AGAMOTTO_ATD_Agent: Locked episode spawn anchors "
+            + $"({_lockedFriendlySpawnWorld.Count} friendlies, {_lockedEnemySpawnWorld.Count} hostiles, "
+            + $"{_friendlySquadOffsets?.Count ?? 0} offsets ≤{squadMaxMemberSpacingM:F0}m).");
+    }
+
+    static List<(RideID id, RideVector3 world)> CloneSpawnList(List<(RideID id, RideVector3 world)> source)
+    {
+        var copy = new List<(RideID id, RideVector3 world)>(source.Count);
+        foreach (var pair in source)
+            copy.Add(pair);
+        return copy;
+    }
+
+    static List<(RideID id, RideVector3 world)> BuildSpawnSnapshot(
+        IEnumerable<RideID> ids,
+        ITransformSystem ts)
+    {
+        var list = new List<(RideID id, RideVector3 world)>();
+        if (ids == null)
+            return list;
+        foreach (RideID id in ids)
+        {
+            if (!IsValidRideId(id))
+                continue;
+            list.Add((id, ts.GetPosition(id)));
+        }
+        return list;
+    }
+
+    public void EnableRlCombatEngagement()
+    {
+        Globals.api.attackSystem.flags =
+            Ride.Combat.AttackSystemFlags.Auto_Attack | Ride.Combat.AttackSystemFlags.Acquire_Targets;
+    }
+
+    static void SuppressCombatDuringReset()
+    {
+        Globals.api.attackSystem.flags = Ride.Combat.AttackSystemFlags.Acquire_Targets;
+    }
+
+    IEnumerable<(RideID id, RideVector3 world)> FriendlySpawnsForReset() =>
+        _lockedFriendlySpawnWorld ?? _friendlySpawnWorld;
+
+    IEnumerable<(RideID id, RideVector3 world)> EnemySpawnsForReset() =>
+        _lockedEnemySpawnWorld ?? _enemySpawnWorld;
 
     static List<(RideID id, RideVector3 world)> MergeSpawnSnapshot(
         List<(RideID id, RideVector3 world)> prior,
@@ -319,26 +530,31 @@ public class AGAMOTTO_ATD_Agent : RLAgent
 
         Debug.Log($"Episode reset, moving agent from {agentTransform.position} to start; enemy to {m_enemyStartingPosition}");
 
-        EnsureLeaderInFriendlySpawnSnapshot();
+        SuppressCombatDuringReset();
 
-        // Revive RL leader before movement so RIDE does not ignore teleports on a dead handle.
-        if (agentSystem.IsAgentDead(agent))
-            agentSystem.ReviveAgent(agent);
+        var friendlySpawns = FriendlySpawnsForReset();
+        var enemySpawns = EnemySpawnsForReset();
 
-        // Reset full squads to RL-init sim poses (merged snapshots + leader-last teleport).
-        if (_friendlySpawnWorld != null && _friendlySpawnWorld.Count > 0)
+        // Friendlies first (revive + teleport), then hostiles — avoids crossfire during reset.
+        if (friendlySpawns != null && friendlySpawns.Any())
         {
-            TeleportTeamToSpawnWorld(_friendlySpawnWorld);
-            Debug.Log($"AGAMOTTO_ATD_Agent: Teleported {_friendlySpawnWorld.Count} friendlies to spawn snapshots.");
+            TeleportTeamToSpawnWorld(friendlySpawns);
+            Debug.Log($"AGAMOTTO_ATD_Agent: Teleported friendly squad to spawn anchors.");
         }
         else
         {
+            EnsureLeaderInFriendlySpawnSnapshot();
+            if (agentSystem.IsAgentDead(agent))
+                agentSystem.ReviveAgent(agent);
             Debug.LogWarning("AGAMOTTO_ATD_Agent: No friendly spawn snapshot; using formation delta to m_startingPosition.");
             TeleportFriendlySquadPreservingFormation(m_startingPosition);
         }
 
-        if (_enemySpawnWorld != null && _enemySpawnWorld.Count > 0)
-            TeleportTeamToSpawnWorld(_enemySpawnWorld);
+        if (enemySpawns != null && enemySpawns.Any())
+        {
+            TeleportTeamToSpawnWorld(enemySpawns);
+            Debug.Log($"AGAMOTTO_ATD_Agent: Teleported hostile squad to spawn anchors.");
+        }
         else if (HasAssignedEnemy(m_enemy))
         {
             if (agentSystem.IsAgentDead(m_enemy))
@@ -365,12 +581,13 @@ public class AGAMOTTO_ATD_Agent : RLAgent
             movementSystem.MoveTeleport(agent, m_startingPosition);
         }
 
-        // Enemy squad already reset above when _enemySpawnWorld is set; single-enemy fallback only if no snapshot.
-        if ((_enemySpawnWorld == null || _enemySpawnWorld.Count == 0) && !HasAssignedEnemy(m_enemy))
+        if ((enemySpawns == null || !enemySpawns.Any()) && !HasAssignedEnemy(m_enemy))
             Debug.LogWarning("AGAMOTTO_ATD_Agent: m_enemy is not assigned; skipping enemy reset.");
 
+        EnableRlCombatEngagement();
         RefreshSquadAliveBaselines(agentSystem);
         ResetEpisodeKillCounters();
+        _loggedSquadMoveThisEpisode = false;
     }
 
     void ResetEpisodeKillCounters()
@@ -379,9 +596,14 @@ public class AGAMOTTO_ATD_Agent : RLAgent
         _episodeFriendliesLost = 0;
     }
 
-    /// <summary>Writes per-episode kill counts for <c>training_eval_summarize.py</c> / TensorBoard.</summary>
-    void RecordEpisodeKillStats()
+    /// <summary>Unity log + TensorBoard scalars for eval summarization.</summary>
+    void LogAndRecordEpisodeKillStats(string outcome)
     {
+        Debug.Log(
+            $"AGAMOTTO_ATD_Agent: Episode {episodeCounter} end ({outcome}) — "
+            + $"enemies_killed={_episodeEnemiesKilled}, friendlies_lost={_episodeFriendliesLost}, "
+            + $"step={stepCount}, cumulative_reward={GetCumulativeReward():F3}");
+
         if (Academy.Instance?.StatsRecorder == null)
             return;
         Academy.Instance.StatsRecorder.Add(
@@ -394,9 +616,9 @@ public class AGAMOTTO_ATD_Agent : RLAgent
             StatAggregationMethod.MostRecent);
     }
 
-    void EndEpisodeWithTrainingStats()
+    void EndEpisodeWithTrainingStats(string outcome)
     {
-        RecordEpisodeKillStats();
+        LogAndRecordEpisodeKillStats(outcome);
         EndEpisode();
     }
 
@@ -404,9 +626,10 @@ public class AGAMOTTO_ATD_Agent : RLAgent
     void RefreshSquadAliveBaselines(IAgentSystem agentSystem)
     {
         _enemyAlivePrevStep.Clear();
-        if (_enemySpawnWorld != null)
+        var enemySpawns = EnemySpawnsForReset();
+        if (enemySpawns != null)
         {
-            foreach (var pair in _enemySpawnWorld)
+            foreach (var pair in enemySpawns)
             {
                 if (!IsValidRideId(pair.id))
                     continue;
@@ -416,9 +639,10 @@ public class AGAMOTTO_ATD_Agent : RLAgent
         }
 
         _friendlyAlivePrevStep.Clear();
-        if (_friendlySpawnWorld != null)
+        var friendlySpawns = FriendlySpawnsForReset();
+        if (friendlySpawns != null)
         {
-            foreach (var pair in _friendlySpawnWorld)
+            foreach (var pair in friendlySpawns)
             {
                 if (!IsValidRideId(pair.id))
                     continue;
@@ -431,9 +655,10 @@ public class AGAMOTTO_ATD_Agent : RLAgent
     /// <summary>Rewards enemy squad losses (except primary <see cref="m_enemy"/>, which uses mission success) and penalizes friendly wingman deaths.</summary>
     void ApplySquadCombatDeathRewards(IAgentSystem agentSystem)
     {
-        if (_enemySpawnWorld != null)
+        var enemySpawns = EnemySpawnsForReset();
+        if (enemySpawns != null)
         {
-            foreach (var pair in _enemySpawnWorld)
+            foreach (var pair in enemySpawns)
             {
                 RideID id = pair.id;
                 if (!IsValidRideId(id))
@@ -455,7 +680,7 @@ public class AGAMOTTO_ATD_Agent : RLAgent
             }
 
             _enemyAlivePrevStep.Clear();
-            foreach (var pair in _enemySpawnWorld)
+            foreach (var pair in enemySpawns)
             {
                 if (!IsValidRideId(pair.id))
                     continue;
@@ -464,9 +689,10 @@ public class AGAMOTTO_ATD_Agent : RLAgent
             }
         }
 
-        if (_friendlySpawnWorld != null)
+        var friendlySpawns = FriendlySpawnsForReset();
+        if (friendlySpawns != null)
         {
-            foreach (var pair in _friendlySpawnWorld)
+            foreach (var pair in friendlySpawns)
             {
                 RideID id = pair.id;
                 if (!IsValidRideId(id))
@@ -483,7 +709,7 @@ public class AGAMOTTO_ATD_Agent : RLAgent
             }
 
             _friendlyAlivePrevStep.Clear();
-            foreach (var pair in _friendlySpawnWorld)
+            foreach (var pair in friendlySpawns)
             {
                 if (!IsValidRideId(pair.id))
                     continue;
@@ -495,10 +721,14 @@ public class AGAMOTTO_ATD_Agent : RLAgent
 
     float GetEnemySquadAliveRatio(IAgentSystem agentSystem)
     {
-        if (_enemySpawnWorld == null || _enemySpawnWorld.Count == 0)
+        var enemySpawns = EnemySpawnsForReset();
+        if (enemySpawns == null)
+            return 0f;
+        var list = enemySpawns as IList<(RideID id, RideVector3 world)> ?? enemySpawns.ToList();
+        if (list.Count == 0)
             return 0f;
         int alive = 0;
-        foreach (var pair in _enemySpawnWorld)
+        foreach (var pair in list)
         {
             if (!IsValidRideId(pair.id))
                 continue;
@@ -506,16 +736,17 @@ public class AGAMOTTO_ATD_Agent : RLAgent
                 alive++;
         }
 
-        return (float)alive / _enemySpawnWorld.Count;
+        return (float)alive / list.Count;
     }
 
     float GetFriendlyWingmanAliveRatio(IAgentSystem agentSystem)
     {
-        if (_friendlySpawnWorld == null || _friendlySpawnWorld.Count == 0)
+        var friendlySpawns = FriendlySpawnsForReset();
+        if (friendlySpawns == null)
             return 0f;
         int wing = 0;
         int alive = 0;
-        foreach (var pair in _friendlySpawnWorld)
+        foreach (var pair in friendlySpawns)
         {
             if (!IsValidRideId(pair.id) || SameRideEntityId(pair.id, agent))
                 continue;
@@ -583,21 +814,23 @@ public class AGAMOTTO_ATD_Agent : RLAgent
     protected override void TakeAction(ActionBuffers actions)
     {
         IAgentSystem agentSystem = Globals.api.agentSystem;
+        bool inCombatWarmup = stepCount <= combatTerminalWarmupSteps;
 
-        ApplySquadCombatDeathRewards(agentSystem);
+        if (!inCombatWarmup)
+            ApplySquadCombatDeathRewards(agentSystem);
 
-        if (HasAssignedEnemy(m_enemy) && agentSystem.IsAgentDead(m_enemy))
+        if (!inCombatWarmup && HasAssignedEnemy(m_enemy) && agentSystem.IsAgentDead(m_enemy))
         {
             Debug.Log($"AGAMOTTO_ATD_Agent: Episode success — primary enemy eliminated id={m_enemy.id} v={m_enemy.version}.");
             AddReward(m_successReward);
             NotifyTakTrainingOutcome(true, "primary_enemy_killed");
             DispatchTrainingResult(true);
             suppressStepPunishmentThisAction = true;
-            EndEpisodeWithTrainingStats();
+            EndEpisodeWithTrainingStats("primary_enemy_killed");
             return;
         }
 
-        if (agentSystem.IsAgentDead(agent))
+        if (!inCombatWarmup && agentSystem.IsAgentDead(agent))
         {
             Debug.Log($"AGAMOTTO_ATD_Agent: Episode failure — RL leader killed id={agent.id} v={agent.version}.");
             _episodeFriendliesLost++;
@@ -605,7 +838,7 @@ public class AGAMOTTO_ATD_Agent : RLAgent
             NotifyTakTrainingOutcome(false, "leader_killed");
             DispatchTrainingResult(false);
             suppressStepPunishmentThisAction = true;
-            EndEpisodeWithTrainingStats();
+            EndEpisodeWithTrainingStats("leader_killed");
             return;
         }
 
@@ -626,7 +859,10 @@ public class AGAMOTTO_ATD_Agent : RLAgent
             Vector3 newPos = from + direction * stepDistance;
 
             RideVector3 dest = new RideVector3(newPos.x, newPos.y, newPos.z);
-            TeleportFriendlySquadPreservingFormation(dest);
+            if (useSquadNavMeshPaths)
+                IssueFriendlySquadLeaderStepPath(dest);
+            else
+                TeleportFriendlySquadPreservingFormation(dest);
         }
 
         if (!HasAssignedEnemy(m_enemy))
@@ -652,7 +888,7 @@ public class AGAMOTTO_ATD_Agent : RLAgent
             DispatchTrainingResult(false);
             Debug.Log($"Episode reset at step: {stepCount}");
             suppressStepPunishmentThisAction = true;
-            EndEpisodeWithTrainingStats();
+            EndEpisodeWithTrainingStats("max_step");
             return;
         }
 

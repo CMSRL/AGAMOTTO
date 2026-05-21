@@ -12,11 +12,12 @@ default_scenario: unity_data_atd
 scenarios:
   unity_data_atd:
     type: unity_data
-    cot_data_dir: Unity_Data
+    # Only the two CoT files already in Simulation/Assets/StreamingAssets/entities (no synthetic spawns).
+    use_streaming_assets_entities: true
     dispatch_mode: Training
-    inject_hostile_if_missing: true
-    hostile_lat: 35.335081
-    hostile_lon: -116.5160077
+    inject_hostile_if_missing: false
+    include_routes: false
+    one_entity_per_team: true
     training_friendly_limit: 1
     disable_tak_feedback: true
 
