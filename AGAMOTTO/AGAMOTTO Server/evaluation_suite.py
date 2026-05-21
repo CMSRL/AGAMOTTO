@@ -3,11 +3,11 @@
 AGAMOTTO evaluation suite: scripted Unity + CoT training runs and ablation matrix.
 
 Coordinates:
-  1. Unity play mode (orchestrator_core)
-  2. Terrain readiness (Assets/status.json)
-  3. Training CoT spawns (hostile then friendly)
-  4. mlagents-learn per experiment YAML
-  5. training_eval_summarize.py on TensorBoard output
+  1. mlagents-learn (listening before Unity connects; --timeout-wait)
+  2. Unity play mode (orchestrator_core)
+  3. Terrain readiness (Assets/status.json)
+  4. Training CoT spawns (hostile then friendly)
+  5. Wait for training to finish; training_eval_summarize.py on TensorBoard output
 
 Prerequisites:
   - Copy evaluation/paths.example.yaml -> evaluation/paths.local.yaml
@@ -65,37 +65,63 @@ def build_scenario(
     scenario_name: str,
     server_base: Optional[Path] = None,
 ) -> List[dict]:
+    from evaluation.unity_data_loader import apply_dispatch_mode
+
     scenarios = manifest.get("scenarios") or {}
     cfg = scenarios.get(scenario_name) or scenarios.get(manifest.get("default_scenario", "atd_default"), {})
     if cfg.get("type") == "unity_data":
         return scenario_from_manifest_config(cfg, server_base or SERVER_DIR)
-    return default_atd_scenario(
+
+    dispatch_mode = str(cfg.get("dispatch_mode", "Training"))
+    training_limit = cfg.get("training_friendly_limit", 1)
+    friendly_count: list[int] = [0]
+    entities = default_atd_scenario(
         friendly_lat=float(cfg.get("friendly_lat", 35.331081)),
         friendly_lon=float(cfg.get("friendly_lon", -116.5210077)),
         hostile_lat=float(cfg.get("hostile_lat", 35.335081)),
         hostile_lon=float(cfg.get("hostile_lon", -116.5160077)),
     )
+    for ent in entities:
+        ent["cot_xml"] = apply_dispatch_mode(
+            ent["cot_xml"],
+            dispatch_mode,
+            training_friendly_limit=training_limit,
+            friendly_training_count=friendly_count,
+        )
+    return entities
 
 
 def scenario_test_overrides(manifest: Dict[str, Any], scenario_name: str) -> Dict[str, Any]:
     """Extra Unity active_run.json flags for automated scenarios (e.g. no WinTAK feedback)."""
     scenarios = manifest.get("scenarios") or {}
     cfg = scenarios.get(scenario_name) or {}
-    overrides: Dict[str, Any] = {}
+    overrides: Dict[str, Any] = {
+        "dispatchMode": str(cfg.get("dispatch_mode", "Training")),
+        "trainingFriendlyLimit": int(cfg.get("training_friendly_limit", 1)),
+    }
     if cfg.get("disable_tak_feedback"):
         overrides["sendTrainingFeedbackToTak"] = False
     return overrides
 
 
-def unity_overrides_payload(exp: Dict[str, Any]) -> Dict[str, Any]:
+def unity_overrides_payload(exp: Dict[str, Any], paths: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     overrides = dict(exp.get("unity_overrides") or {})
-    payload = {"runId": exp.get("run_id") or exp.get("id")}
+    payload = {
+        "runId": exp.get("run_id") or exp.get("id"),
+        # Teleport squad per RL step; NavMesh paths often fail in automated eval.
+        "useSquadNavMeshPaths": False,
+        "squadMaxMemberSpacingM": 20.0,
+    }
+    if paths is not None and "useSquadNavMeshPaths" in paths:
+        payload["useSquadNavMeshPaths"] = bool(paths["useSquadNavMeshPaths"])
     if "sendTrainingFeedbackToTak" in overrides:
         payload["sendTrainingFeedbackToTak"] = bool(overrides["sendTrainingFeedbackToTak"])
     if "rewardPerEnemySquadMemberKilled" in overrides:
         payload["rewardPerEnemySquadMemberKilled"] = float(overrides["rewardPerEnemySquadMemberKilled"])
     if "penaltyPerFriendlyWingmanDeath" in overrides:
         payload["penaltyPerFriendlyWingmanDeath"] = float(overrides["penaltyPerFriendlyWingmanDeath"])
+    if "useSquadNavMeshPaths" in overrides:
+        payload["useSquadNavMeshPaths"] = bool(overrides["useSquadNavMeshPaths"])
     return payload
 
 
@@ -128,28 +154,77 @@ def run_summarize(python_exe: str, run_dir: Path, export_csv: Optional[Path]) ->
         return {"raw_stdout": proc.stdout, "raw_stderr": proc.stderr}
 
 
-def run_mlagents_learn(
+def mlagents_subprocess_env() -> dict[str, str]:
+    env = os.environ.copy()
+    env.setdefault("PYTHONUNBUFFERED", "1")
+    env.setdefault("PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION", "python")
+    env.setdefault("PYTHONUTF8", "1")
+    env.setdefault("PYTHONIOENCODING", "utf-8")
+    return env
+
+
+def start_mlagents_learn(
     mlagents_bin: str,
     trainer_config: Path,
     run_id: str,
     results_dir: Path,
-    dry_run: bool,
-) -> int:
+    *,
+    timeout_wait_s: int = 5000,
+) -> subprocess.Popen:
+    """Start mlagents-learn in the background; Unity connects when play mode starts."""
     results_dir.mkdir(parents=True, exist_ok=True)
     cmd = [
         mlagents_bin,
         str(trainer_config),
         f"--run-id={run_id}",
         f"--results-dir={results_dir}",
+        f"--timeout-wait={timeout_wait_s}",
         "--force",
     ]
-    print("[eval] mlagents-learn:", " ".join(cmd))
-    if dry_run:
-        return 0
-    env = os.environ.copy()
-    env.setdefault("PYTHONUNBUFFERED", "1")
-    proc = subprocess.run(cmd, cwd=str(SERVER_DIR), env=env)
-    return proc.returncode
+    print("[eval] mlagents-learn:", " ".join(cmd), flush=True)
+    proc = subprocess.Popen(
+        cmd,
+        cwd=str(SERVER_DIR),
+        env=mlagents_subprocess_env(),
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        bufsize=1,
+    )
+    oc._stream_subprocess_output(proc, "[mlagents] ")
+    return proc
+
+
+def wait_mlagents_learn(
+    proc: subprocess.Popen,
+    *,
+    wall_timeout_s: float,
+    heartbeat_s: float = 60.0,
+) -> int:
+    """Block until mlagents-learn exits (with periodic heartbeats)."""
+    start = time.time()
+    last_heartbeat = 0.0
+    while proc.poll() is None:
+        elapsed = time.time() - start
+        if elapsed > wall_timeout_s:
+            print(
+                f"[eval] Training exceeded wall timeout ({wall_timeout_s / 60:.0f} min); terminating...",
+                flush=True,
+            )
+            proc.terminate()
+            try:
+                proc.wait(timeout=30)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                proc.wait(timeout=15)
+            return -9
+        if elapsed - last_heartbeat >= heartbeat_s:
+            print(f"[eval] training in progress... {elapsed / 60:.1f} min elapsed", flush=True)
+            last_heartbeat = elapsed
+        time.sleep(5)
+    return int(proc.returncode or 0)
 
 
 def run_experiment(
@@ -197,7 +272,7 @@ def run_experiment(
     }
 
     scenario_name = exp.get("scenario") or manifest.get("default_scenario", "atd_default")
-    unity_payload = unity_overrides_payload(exp)
+    unity_payload = unity_overrides_payload(exp, paths)
     unity_payload.update(scenario_test_overrides(manifest, scenario_name))
     oc.write_active_run_config(unity_payload, streaming)
 
@@ -210,57 +285,121 @@ def run_experiment(
         record["status"] = "dry_run"
         return record
 
-    cot_server = oc.CotTcpServer(cot_host, cot_port, streaming)
-    cot_server.start()
+    cot_server: Optional[oc.CotTcpServer] = None
+    train_proc: Optional[subprocess.Popen] = None
+    unity_proc: Optional[subprocess.Popen] = None
 
-    unity_thread = oc.launch_unity_play_mode(unity_exe, str(unity_project), scene_path, batchmode=False)
-    record["unity_launched"] = True
-
-    if not oc.wait_for_terrain_valid(status_json, timeout_s=terrain_timeout):
-        record["status"] = "failed"
-        record["error"] = f"terrain not Valid within {terrain_timeout}s"
-        return record
-
-    print(f"[eval] terrain Valid; waiting {unity_grace}s before CoT spawns...")
-    time.sleep(unity_grace)
-
-    oc.spawn_training_entities_from_scenario(
-        {"entities": entities},
-        host=cot_host,
-        port=cot_port,
-        delay_s=spawn_delay,
-        streaming_root=streaming,
-    )
-
-    time.sleep(5.0)
-
-    if not skip_train:
-        rc = run_mlagents_learn(
-            paths.get("mlagents_learn", "mlagents-learn"),
-            trainer_config,
-            run_id,
-            exp_results,
-            dry_run=False,
+    try:
+        use_streaming_only = bool(
+            (manifest.get("scenarios") or {}).get(scenario_name, {}).get("use_streaming_assets_entities")
         )
-        record["mlagents_returncode"] = rc
-        if rc != 0:
+        cot_server = oc.CotTcpServer(
+            cot_host,
+            cot_port,
+            streaming,
+            persist_streaming_files=not use_streaming_only,
+        )
+        cot_server.start()
+
+        if not skip_train:
+            timeout_wait_s = int(paths.get("mlagents_timeout_wait_s", 5000))
+            print(
+                "[eval] Starting mlagents-learn before Unity "
+                f"(--timeout-wait={timeout_wait_s}s for Academy connect)...",
+                flush=True,
+            )
+            train_proc = start_mlagents_learn(
+                paths.get("mlagents_learn", "mlagents-learn"),
+                trainer_config,
+                run_id,
+                exp_results,
+                timeout_wait_s=timeout_wait_s,
+            )
+            grace_s = float(paths.get("mlagents_startup_grace_s", 5.0))
+            if grace_s > 0:
+                time.sleep(grace_s)
+            record["mlagents_started_before_unity"] = True
+
+        print("[eval] Launching Unity...", flush=True)
+        unity_proc = oc.launch_unity_play_mode_process(
+            unity_exe,
+            str(unity_project),
+            scene_path,
+            batchmode=False,
+            minimal_logs=bool(paths.get("unity_log_minimal", True)),
+        )
+        record["unity_launched"] = True
+        record["unity_pid"] = unity_proc.pid
+
+        if not oc.wait_for_terrain_valid(status_json, timeout_s=terrain_timeout):
             record["status"] = "failed"
-            record["error"] = f"mlagents-learn exited {rc}"
+            record["error"] = f"terrain not Valid within {terrain_timeout}s"
             return record
 
-    run_dir = find_latest_run_dir(exp_results, behavior)
-    if run_dir:
-        csv_path = exp_results / f"{run_id}_episode_metrics.csv"
-        summary = run_summarize(sys.executable, run_dir, csv_path)
-        record["tensorboard_run_dir"] = str(run_dir)
-        record["summarize"] = summary
-        record["status"] = "completed"
-    else:
-        record["status"] = "completed_no_events"
-        record["warning"] = "No TensorBoard events found under results dir"
+        print(f"[eval] terrain Valid; waiting {unity_grace}s before CoT spawns...", flush=True)
+        time.sleep(unity_grace)
 
-    record["finished_at"] = datetime.now(timezone.utc).isoformat()
-    return record
+        print(
+            f"[eval] Spawning {len(entities)} CoT message(s): "
+            + ", ".join(e.get("label", e.get("uid", "?")) for e in entities),
+            flush=True,
+        )
+        oc.spawn_cot_entries(
+            entities,
+            host=cot_host,
+            port=cot_port,
+            delay_s=spawn_delay,
+            streaming_root=streaming,
+            replay_in_place=use_streaming_only,
+            send_tcp=not use_streaming_only,
+            prune_extra_entities=use_streaming_only,
+        )
+
+        post_spawn_wait = float(paths.get("post_spawn_wait_s", 12.0))
+        print(f"[eval] Waiting {post_spawn_wait}s after CoT spawn...", flush=True)
+        time.sleep(post_spawn_wait)
+
+        if not skip_train and train_proc is not None:
+            wall_timeout_s = float(paths.get("train_wall_timeout_s", 0))
+            if wall_timeout_s <= 0:
+                wall_timeout_s = max(3600.0, 1_000_000 * 0.08 + 600.0)
+            record["train_wall_timeout_s"] = wall_timeout_s
+            print(
+                f"[eval] Waiting for mlagents-learn (already running; wall_timeout={wall_timeout_s / 60:.0f} min)...",
+                flush=True,
+            )
+            rc = wait_mlagents_learn(train_proc, wall_timeout_s=wall_timeout_s)
+            train_proc = None
+            record["mlagents_returncode"] = rc
+            if rc != 0:
+                record["status"] = "failed"
+                record["error"] = f"mlagents-learn exited {rc}"
+                return record
+
+        run_dir = find_latest_run_dir(exp_results, behavior)
+        if run_dir:
+            csv_path = exp_results / f"{run_id}_episode_metrics.csv"
+            summary = run_summarize(sys.executable, run_dir, csv_path)
+            record["tensorboard_run_dir"] = str(run_dir)
+            record["summarize"] = summary
+            record["status"] = "completed"
+        else:
+            record["status"] = "completed_no_events"
+            record["warning"] = "No TensorBoard events found under results dir"
+        return record
+    finally:
+        if train_proc is not None and train_proc.poll() is None:
+            print("[eval] Stopping mlagents-learn...", flush=True)
+            train_proc.terminate()
+            try:
+                train_proc.wait(timeout=20)
+            except subprocess.TimeoutExpired:
+                train_proc.kill()
+        if cot_server is not None:
+            cot_server.stop()
+        unity_shutdown_s = float(paths.get("unity_shutdown_timeout_s", 25.0))
+        oc.shutdown_unity_process(unity_proc, timeout_s=unity_shutdown_s)
+        record["finished_at"] = datetime.now(timezone.utc).isoformat()
 
 
 def write_suite_artifacts(suite_results: Path, rows: List[Dict[str, Any]], manifest: Dict[str, Any]) -> None:

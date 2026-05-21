@@ -46,6 +46,21 @@ namespace AGAMOTTO
 
     public class AGAMOTTOScenarioCreator : RideBaseMinimal
     {
+        static bool IsFriendlyCotType(string cotType)
+        {
+            if (string.IsNullOrEmpty(cotType))
+                return false;
+            string[] segments = cotType.Split('-');
+            return segments.Length >= 2 && segments[0] == "a" && segments[1].StartsWith("f");
+        }
+
+        static bool IsHostileCotType(string cotType)
+        {
+            if (string.IsNullOrEmpty(cotType))
+                return false;
+            string[] segments = cotType.Split('-');
+            return segments.Length >= 2 && segments[0] == "a" && segments[1].StartsWith("h");
+        }
 
         public bool NavMeshBuilt { get; private set; } = false;
         protected TerrainLoader m_terrainLoader;
@@ -138,8 +153,8 @@ namespace AGAMOTTO
             worldStateSystem.AddListener<TerrainLoadedEvent>(WorldEvent.terrainLoaded, OnTerrainLoaded);
             LoadTerrain();
 
-            //change later, gives all agents authority to attack at will
-            Globals.api.attackSystem.flags = Ride.Combat.AttackSystemFlags.Auto_Attack;
+            Globals.api.attackSystem.flags =
+                Ride.Combat.AttackSystemFlags.Auto_Attack | Ride.Combat.AttackSystemFlags.Acquire_Targets;
 
             //create a watcher to monitor input file directory for new or modified scenario files
             string filePath = Application.streamingAssetsPath;
@@ -211,24 +226,35 @@ namespace AGAMOTTO
 
                     UnityMainThreadDispatcher.Instance().Enqueue(() =>
                     {
+                        if (type != null && type.StartsWith("a") && entityList != null && entityList.ContainsKey(uid))
+                        {
+                            Debug.Log($"AGAMOTTO: Ignoring duplicate CoT for uid={uid} (unit already spawned).");
+                            return;
+                        }
+
                         if (mode.Equals("Training"))
                         {
                             Debug.Log($"Received a CoT Message in RL Training Mode");
-                            //'a' is atomic, meaning it is a physical thin, like a unit
                             if (type != null && type.StartsWith("a"))
                             {
-                                string[] segments = type.Split('-');
                                 Debug.Log($"Creating {type} Unit at Lat:{lat}, Lon:{lon}");
                                 RideID unitCreated = CreateUnit(type, uid, double.Parse(lat), double.Parse(lon), false);
-                                //if friendly, begin training using desired mission and reward type
-                                if (segments[1].StartsWith('f'))
+                                if (IsHostileCotType(type))
                                 {
-                                    Debug.Log("Beginning RL Training for Friendly Unit");
-                                    bool trainingStarted = StartRLTraining(unitCreated);
+                                    Debug.Log(
+                                        "AGAMOTTO: Hostile unit spawned (Red); Training mode ignored for a-h-* (no ML-Agents).");
                                 }
-                                
+                                else if (IsFriendlyCotType(type))
+                                {
+                                    Debug.Log("AGAMOTTO: Beginning RL training for friendly squad (Blue).");
+                                    StartRLTraining(unitCreated);
+                                }
+                                else
+                                {
+                                    Debug.LogWarning(
+                                        $"AGAMOTTO: Unknown atomic CoT type '{type}' in Training mode; unit spawned without RL.");
+                                }
                             }
-
                         }
                         else if (mode.Equals("Evaluation"))
                         {
@@ -469,10 +495,31 @@ namespace AGAMOTTO
 
         bool StartRLTraining(RideID tacticalGroup, string mission = "AttackToDestroy")
         {
+            if (!AGAMOTTO_EvaluationRunConfig.TryClaimRlTrainingSlot())
+            {
+                Debug.LogWarning("AGAMOTTO: RL training slot limit reached; skipping extra friendly policy.");
+                return false;
+            }
+
             RideID squadLeaderId = Globals.api.groupSystem.GetGroupLeader(tacticalGroup);
+            if (!AGAMOTTO_ATD_Agent.IsValidRideId(squadLeaderId))
+            {
+                Debug.LogError("AGAMOTTO: StartRLTraining failed — no squad leader.");
+                return false;
+            }
+
+            Team leaderTeam = Globals.api.agentSystem.GetAgentTeam(squadLeaderId);
+            if (leaderTeam != Team.Blue)
+            {
+                Debug.LogError(
+                    $"AGAMOTTO: StartRLTraining refused — leader team is {leaderTeam}, expected Blue (friendly).");
+                return false;
+            }
 
             //collect settings specific to ATD, which includes custom ATD agent
-            Debug.Log($"Beginning RL Training for RIDE Unit {tacticalGroup.id} with Mission: {mission}");
+            Debug.Log(
+                $"AGAMOTTO: Attaching RL policy to friendly leader id={squadLeaderId.id} "
+                + $"(tacticalGroup={tacticalGroup.id}) mission={mission}");
             GameObject missionSettings = m_settingsPrefabGameObjects.FirstOrDefault(obj => obj.name == mission);
             AGAMOTTO_RL_Behavior RLBehavior = new AGAMOTTO_RL_Behavior(missionSettings, 1000f, tacticalGroup);
 

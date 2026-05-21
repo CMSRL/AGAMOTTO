@@ -53,7 +53,7 @@ def default_atd_scenario(
                 cot_type="a-h-G-U-C",
                 lat=hostile_lat,
                 lon=hostile_lon,
-                mode="Training",
+                mode="Evaluation",
             ),
         },
         {
