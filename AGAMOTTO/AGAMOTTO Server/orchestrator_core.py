@@ -323,22 +323,59 @@ def run_async_in_thread(coro) -> threading.Thread:
     return t
 
 
+def clear_terrain_status(status_path: Optional[Path] = None) -> None:
+    """Remove stale status.json so a new Unity session cannot appear ready before terrain loads."""
+    path = status_path or default_status_json()
+    try:
+        if path.exists():
+            path.unlink()
+    except OSError as ex:
+        print(f"[orchestrator] WARN could not clear terrain status {path}: {ex}", flush=True)
+
+
 def wait_for_terrain_valid(
     status_path: Optional[Path] = None,
     timeout_s: float = 600.0,
     poll_s: float = 2.0,
+    *,
+    min_mtime: Optional[float] = None,
+    log_progress: bool = True,
 ) -> bool:
+    """Wait until status.json reports Valid.
+
+    Pass min_mtime (epoch seconds) to ignore a leftover Valid from a previous Unity run.
+    """
     path = status_path or default_status_json()
     deadline = time.time() + timeout_s
+    started = time.time()
+    last_log = started
     while time.time() < deadline:
         if path.exists():
             try:
-                data = json.loads(path.read_text(encoding="utf-8"))
-                if data.get("status") == "Valid":
-                    return True
+                if min_mtime is not None and path.stat().st_mtime < min_mtime:
+                    pass
+                else:
+                    data = json.loads(path.read_text(encoding="utf-8"))
+                    if data.get("status") == "Valid":
+                        if log_progress:
+                            elapsed = time.time() - started
+                            print(
+                                f"[orchestrator] terrain Valid ({elapsed:.1f}s, mtime ok)",
+                                flush=True,
+                            )
+                        return True
             except (json.JSONDecodeError, OSError):
                 pass
+        now = time.time()
+        if log_progress and now - last_log >= 15.0:
+            print(
+                f"[orchestrator] waiting for terrain Valid... ({now - started:.0f}s)",
+                flush=True,
+            )
+            last_log = now
         time.sleep(poll_s)
+    if log_progress:
+        print(f"[orchestrator] terrain not Valid within {timeout_s}s", flush=True)
     return False
 
 
@@ -420,6 +457,11 @@ def spawn_cot_entries(
 
         xml_path.parent.mkdir(parents=True, exist_ok=True)
         xml_path.write_text(cot_xml, encoding="utf-8")
+        if replay_in_place:
+            try:
+                os.utime(xml_path, None)
+            except OSError:
+                pass
         time.sleep(delay_s)
 
         if send_tcp:

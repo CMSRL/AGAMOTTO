@@ -49,12 +49,17 @@ def main() -> int:
     server.start()
 
     if not args.no_launch_unity:
+        status_json = project / "Assets" / "status.json"
+        oc.clear_terrain_status(status_json)
+        launch_time = time.time()
         unity_exe = oc.resolve_unity_exe(project)
+        print("[spawn] Launching Unity...")
         oc.launch_unity_play_mode(unity_exe, str(project), "Assets/Scenes/BaseScene.unity")
-        if not oc.wait_for_terrain_valid(project / "Assets" / "status.json"):
+        print("[spawn] Waiting for terrain Valid...")
+        if not oc.wait_for_terrain_valid(status_json, min_mtime=launch_time):
             print("[spawn] ERROR: terrain not Valid", file=sys.stderr)
             return 2
-        print("[spawn] terrain Valid; waiting 15s...")
+        print("[spawn] terrain ready; waiting 15s...")
         time.sleep(15.0)
 
     oc.spawn_cot_entries(

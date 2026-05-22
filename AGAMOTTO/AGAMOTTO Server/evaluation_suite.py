@@ -320,6 +320,9 @@ def run_experiment(
                 time.sleep(grace_s)
             record["mlagents_started_before_unity"] = True
 
+        oc.clear_terrain_status(status_json)
+        unity_launch_time = time.time()
+
         print("[eval] Launching Unity...", flush=True)
         unity_proc = oc.launch_unity_play_mode_process(
             unity_exe,
@@ -331,12 +334,18 @@ def run_experiment(
         record["unity_launched"] = True
         record["unity_pid"] = unity_proc.pid
 
-        if not oc.wait_for_terrain_valid(status_json, timeout_s=terrain_timeout):
+        print("[eval] Waiting for terrain Valid (fresh status.json after launch)...", flush=True)
+        if not oc.wait_for_terrain_valid(
+            status_json,
+            timeout_s=terrain_timeout,
+            min_mtime=unity_launch_time,
+            log_progress=True,
+        ):
             record["status"] = "failed"
             record["error"] = f"terrain not Valid within {terrain_timeout}s"
             return record
 
-        print(f"[eval] terrain Valid; waiting {unity_grace}s before CoT spawns...", flush=True)
+        print(f"[eval] Waiting {unity_grace}s after terrain Valid before CoT spawns...", flush=True)
         time.sleep(unity_grace)
 
         print(
