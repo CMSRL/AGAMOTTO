@@ -40,7 +40,7 @@ The suite runs six SAC ablations for **Attack-to-Destroy** (`AGAMOTTO_RL`), one 
 ### What each run does
 
 1. Writes `StreamingAssets/evaluation/active_run.json` (Unity overrides for that ablation).
-2. Starts **`mlagents-learn`** (trainer waits for Academy).
+2. Starts **`mlagents-learn`** with `--time-scale=50` (trainer waits for Academy).
 3. Clears stale `Assets/status.json`, launches **Unity** play mode on `BaseScene`.
 4. Waits for terrain **Valid** (fresh `status.json` after launch).
 5. Spawns **two CoT entities** from `AGAMOTTO Simulation/Assets/StreamingAssets/entities` (one friendly `a-f-*`, one hostile `a-h-*`; no synthetic extras).

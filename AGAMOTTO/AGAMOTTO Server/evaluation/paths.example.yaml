@@ -9,6 +9,8 @@ scene_path: "Assets/Scenes/BaseScene.unity"
 # Use Python 3.10 conda env: scripts/setup_mlagents_env.ps1
 mlagents_learn: "C:/Users/YOU/anaconda3/envs/agamotto-ml/Scripts/mlagents-learn.exe"
 mlagents_timeout_wait_s: 5000
+# Unity simulation time scale while training (passed to mlagents-learn).
+mlagents_time_scale: 50
 # Seconds after mlagents-learn starts, before launching Unity (trainer socket bind).
 mlagents_startup_grace_s: 5
 trainer_config_base: "C:/Users/matthew.corbett/ml-agents/config/ppo/AGAMOTTO_RL_config.yaml"
