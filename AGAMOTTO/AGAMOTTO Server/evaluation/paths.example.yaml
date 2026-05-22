@@ -1,0 +1,37 @@
+# Copy to paths.local.yaml and edit for your machine (paths.local.yaml is gitignored via *.local.yaml).
+
+# Optional — if omitted, resolved from ProjectSettings/ProjectVersion.txt (2022.3.62f3).
+unity_exe: "C:/Program Files/Unity/Hub/Editor/2022.3.62f3/Editor/Unity.exe"
+unity_project: "../AGAMOTTO Simulation"
+scene_path: "Assets/Scenes/BaseScene.unity"
+
+# ML-Agents CLI and base trainer YAML (SAC / AGAMOTTO_RL behavior).
+# Use Python 3.10 conda env: scripts/setup_mlagents_env.ps1
+mlagents_learn: "C:/Users/YOU/anaconda3/envs/agamotto-ml/Scripts/mlagents-learn.exe"
+mlagents_timeout_wait_s: 5000
+# Unity simulation time scale while training (passed to mlagents-learn).
+mlagents_time_scale: 50
+# Seconds after mlagents-learn starts, before launching Unity (trainer socket bind).
+mlagents_startup_grace_s: 5
+trainer_config_base: "C:/Users/matthew.corbett/ml-agents/config/ppo/AGAMOTTO_RL_config.yaml"
+
+# Collapse Unity stdout to single-line AGAMOTTO/ML-Agents signal (no stack traces).
+unity_log_minimal: true
+# false = teleport squad each RL step (recommended for eval); true = NavMesh MoveGroupPath.
+useSquadNavMeshPaths: false
+
+results_root: "evaluation/results"
+cot_host: "127.0.0.1"
+# If bind fails with WinError 10013, set AGAMOTTO_COT_PORT=55032 (and WinTAK plugin port).
+cot_port: 65432
+
+terrain_wait_timeout_s: 600
+spawn_delay_s: 2.0
+unity_startup_grace_s: 15.0
+post_spawn_wait_s: 12.0
+unity_shutdown_timeout_s: 25.0
+train_wall_timeout_s: 0
+
+# Scripted tests: CoT captured from WinTAK exports (no GUI required at test time).
+# Default eval uses StreamingAssets/entities only (see manifest unity_data_atd).
+# unity_data_dir: Unity_Data

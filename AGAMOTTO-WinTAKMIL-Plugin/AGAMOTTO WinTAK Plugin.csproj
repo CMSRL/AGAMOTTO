@@ -173,6 +173,7 @@
     </Page>
     <Compile Include="CoTHelper.cs" />
     <Compile Include="Orchestrator.cs" />
+    <Compile Include="TrainingFeedbackFormatter.cs" />
     <Compile Include="TemplateModule.cs" />
     <Compile Include="TemplateButton.cs" />
     <Compile Include="TemplateDockPane.cs" />

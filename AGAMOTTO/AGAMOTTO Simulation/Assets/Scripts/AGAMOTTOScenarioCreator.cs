@@ -46,6 +46,21 @@ namespace AGAMOTTO
 
     public class AGAMOTTOScenarioCreator : RideBaseMinimal
     {
+        static bool IsFriendlyCotType(string cotType)
+        {
+            if (string.IsNullOrEmpty(cotType))
+                return false;
+            string[] segments = cotType.Split('-');
+            return segments.Length >= 2 && segments[0] == "a" && segments[1].StartsWith("f");
+        }
+
+        static bool IsHostileCotType(string cotType)
+        {
+            if (string.IsNullOrEmpty(cotType))
+                return false;
+            string[] segments = cotType.Split('-');
+            return segments.Length >= 2 && segments[0] == "a" && segments[1].StartsWith("h");
+        }
 
         public bool NavMeshBuilt { get; private set; } = false;
         protected TerrainLoader m_terrainLoader;
@@ -138,8 +153,8 @@ namespace AGAMOTTO
             worldStateSystem.AddListener<TerrainLoadedEvent>(WorldEvent.terrainLoaded, OnTerrainLoaded);
             LoadTerrain();
 
-            //change later, gives all agents authority to attack at will
-            Globals.api.attackSystem.flags = Ride.Combat.AttackSystemFlags.Auto_Attack;
+            Globals.api.attackSystem.flags =
+                Ride.Combat.AttackSystemFlags.Auto_Attack | Ride.Combat.AttackSystemFlags.Acquire_Targets;
 
             //create a watcher to monitor input file directory for new or modified scenario files
             string filePath = Application.streamingAssetsPath;
@@ -211,24 +226,35 @@ namespace AGAMOTTO
 
                     UnityMainThreadDispatcher.Instance().Enqueue(() =>
                     {
+                        if (type != null && type.StartsWith("a") && entityList != null && entityList.ContainsKey(uid))
+                        {
+                            Debug.Log($"AGAMOTTO: Ignoring duplicate CoT for uid={uid} (unit already spawned).");
+                            return;
+                        }
+
                         if (mode.Equals("Training"))
                         {
                             Debug.Log($"Received a CoT Message in RL Training Mode");
-                            //'a' is atomic, meaning it is a physical thin, like a unit
                             if (type != null && type.StartsWith("a"))
                             {
-                                string[] segments = type.Split('-');
                                 Debug.Log($"Creating {type} Unit at Lat:{lat}, Lon:{lon}");
                                 RideID unitCreated = CreateUnit(type, uid, double.Parse(lat), double.Parse(lon), false);
-                                //if friendly, begin training using desired mission and reward type
-                                if (segments[1].StartsWith('f'))
+                                if (IsHostileCotType(type))
                                 {
-                                    Debug.Log("Beginning RL Training for Friendly Unit");
-                                    bool trainingStarted = StartRLTraining(unitCreated);
+                                    Debug.Log(
+                                        "AGAMOTTO: Hostile unit spawned (Red); Training mode ignored for a-h-* (no ML-Agents).");
                                 }
-                                
+                                else if (IsFriendlyCotType(type))
+                                {
+                                    Debug.Log("AGAMOTTO: Beginning RL training for friendly squad (Blue).");
+                                    StartRLTraining(unitCreated);
+                                }
+                                else
+                                {
+                                    Debug.LogWarning(
+                                        $"AGAMOTTO: Unknown atomic CoT type '{type}' in Training mode; unit spawned without RL.");
+                                }
                             }
-
                         }
                         else if (mode.Equals("Evaluation"))
                         {
@@ -338,9 +364,65 @@ namespace AGAMOTTO
         protected virtual void OnTerrainLoaded(WorldEventMarker marker, TerrainLoadedEvent e)
         {
             Debug.Log("Terrain Finished Loading");
+            // status.json "Valid" is polled by the eval suite; units must be allowed to spawn now,
+            // not only after CreateNavMesh finishes (that was racing ahead of CoT delivery).
+            simulationState.State = SimStateType.TerrainLoaded;
             ExportData.WriteStatus("Valid");
+        }
 
+        bool IsTerrainReadyForUnitSpawn() =>
+            simulationState.State == SimStateType.TerrainLoaded
+            || simulationState.State == SimStateType.Idle;
 
+        static bool IsEntityOrRouteCotPath(string fullPath)
+        {
+            if (string.IsNullOrEmpty(fullPath))
+                return false;
+            string p = fullPath.Replace('\\', '/').ToLowerInvariant();
+            return p.Contains("/entities/") || p.Contains("/routes/");
+        }
+
+        IEnumerator SpawnCotAfterTerrainReady(string cotFilePath)
+        {
+            const int maxFrames = 36000;
+            for (int i = 0; i < maxFrames && !IsTerrainReadyForUnitSpawn(); i++)
+                yield return null;
+
+            if (!IsTerrainReadyForUnitSpawn())
+            {
+                Debug.LogError($"AGAMOTTO: Timed out waiting for terrain before spawning from {cotFilePath}");
+                yield break;
+            }
+
+            yield return null;
+            ProcessCotFileFromPath(cotFilePath, deferIfNotReady: false);
+        }
+
+        void ProcessCotFileFromPath(string fullPath, bool deferIfNotReady = true)
+        {
+            if (!IsEntityOrRouteCotPath(fullPath))
+                return;
+
+            UnityMainThreadDispatcher.Instance().Enqueue(() =>
+            {
+                if (deferIfNotReady && !IsTerrainReadyForUnitSpawn())
+                {
+                    Debug.Log($"AGAMOTTO: Deferring CoT spawn until terrain is ready: {fullPath}");
+                    StartCoroutine(SpawnCotAfterTerrainReady(fullPath));
+                    return;
+                }
+
+                try
+                {
+                    XmlDocument doc = new XmlDocument();
+                    doc.Load(fullPath);
+                    ParseCotAndCreateEntity(doc);
+                }
+                catch (Exception ex)
+                {
+                    Debug.LogError($"AGAMOTTO: Failed to load CoT from {fullPath}: {ex.Message}");
+                }
+            });
         }
 
         bool CreatePath(string callsign, RideVector3[] path)
@@ -432,9 +514,21 @@ namespace AGAMOTTO
                     case "h":
                         if (!entityList.ContainsKey(uid))
                         {
-                            RideID insurgents = Globals.api.agentSystem.CreateSquad(new UnitCreationParams(uid) { rows = 2, cols = 2, position = scenPos, rotation = RideQuaternion.Euler(0, 0, 0), team = Ride.Team.Red });
+                            // Opposing force: 5–6 dismounts in a single tactical group (not the previous 2×2 four-man squad).
+                            int hostileCount = UnityEngine.Random.Range(5, 7);
+                            int rows = hostileCount == 6 ? 2 : 1;
+                            int cols = hostileCount == 6 ? 3 : 5;
+                            RideID insurgents = Globals.api.agentSystem.CreateFireTeam(new UnitCreationParams(uid)
+                            {
+                                rows = rows,
+                                cols = cols,
+                                position = scenPos,
+                                rotation = RideQuaternion.Euler(0, 0, 0),
+                                team = Ride.Team.Red
+                            });
                             entityList.Add(uid, insurgents);
                             simulationState.State = SimStateType.Idle;
+                            Debug.Log($"AGAMOTTO: Red opposing team spawned count={hostileCount} grid={rows}×{cols} uid={uid}.");
                             return insurgents;
                         }
                         break;
@@ -457,10 +551,31 @@ namespace AGAMOTTO
 
         bool StartRLTraining(RideID tacticalGroup, string mission = "AttackToDestroy")
         {
+            if (!AGAMOTTO_EvaluationRunConfig.TryClaimRlTrainingSlot())
+            {
+                Debug.LogWarning("AGAMOTTO: RL training slot limit reached; skipping extra friendly policy.");
+                return false;
+            }
+
             RideID squadLeaderId = Globals.api.groupSystem.GetGroupLeader(tacticalGroup);
+            if (!AGAMOTTO_ATD_Agent.IsValidRideId(squadLeaderId))
+            {
+                Debug.LogError("AGAMOTTO: StartRLTraining failed — no squad leader.");
+                return false;
+            }
+
+            Team leaderTeam = Globals.api.agentSystem.GetAgentTeam(squadLeaderId);
+            if (leaderTeam != Team.Blue)
+            {
+                Debug.LogError(
+                    $"AGAMOTTO: StartRLTraining refused — leader team is {leaderTeam}, expected Blue (friendly).");
+                return false;
+            }
 
             //collect settings specific to ATD, which includes custom ATD agent
-            Debug.Log($"Beginning RL Training for RIDE Unit {tacticalGroup.id} with Mission: {mission}");
+            Debug.Log(
+                $"AGAMOTTO: Attaching RL policy to friendly leader id={squadLeaderId.id} "
+                + $"(tacticalGroup={tacticalGroup.id}) mission={mission}");
             GameObject missionSettings = m_settingsPrefabGameObjects.FirstOrDefault(obj => obj.name == mission);
             AGAMOTTO_RL_Behavior RLBehavior = new AGAMOTTO_RL_Behavior(missionSettings, 1000f, tacticalGroup);
 
@@ -651,25 +766,16 @@ namespace AGAMOTTO
         private void OnChanged(object sender, FileSystemEventArgs e)
         {
             if (e.ChangeType != WatcherChangeTypes.Changed)
-            {
                 return;
-            }
 
             Debug.Log($"Changed: {e.FullPath}");
-            XmlDocument doc = new XmlDocument();
-            doc.Load(e.FullPath);
-            ParseCotAndCreateEntity(doc);
-
-
-
+            ProcessCotFileFromPath(e.FullPath);
         }
 
         private void OnCreated(object sender, FileSystemEventArgs e)
         {
-            string value = $"Created: {e.FullPath}";
-            XmlDocument doc = new XmlDocument();
-            doc.Load(e.FullPath);
-            ParseCotAndCreateEntity(doc);
+            Debug.Log($"Created: {e.FullPath}");
+            ProcessCotFileFromPath(e.FullPath);
         }
 
         private static void OnDeleted(object sender, FileSystemEventArgs e) =>
