@@ -144,7 +144,7 @@ Implemented in `AGAMOTTO_ATD_Agent.cs` (defaults on `AttackToDestroy` prefab):
 | Closer / farther from primary enemy | +0.002 / −0.0008 per step |
 | Obstacle collision | −0.002 |
 
-Episodes reset all squads to locked spawn anchors (revive + teleport). Mission success requires the primary enemy to have been **alive after reset** and killed during that episode.
+Episodes reset all squads to locked spawn anchors via **`SetAgentHealthFull`** + **Idle** state + teleport (RIDE `ReviveAgent` alone does not restore HP). Mission success requires the primary enemy to have been **alive after reset** and killed during that episode.
 
 ---
 
@@ -163,7 +163,8 @@ Episodes reset all squads to locked spawn anchors (revive + teleport). Mission s
 | Symptom | Check |
 |---------|--------|
 | CoT spawns before terrain ready | Suite clears `status.json` and uses `min_mtime` on Valid; ensure `AGAMOTTOScenarioCreator` writes Valid on terrain load. |
-| Instant episode success loop | Rebuild Unity after ATD agent reset fixes; primary must be revived in `OnEpisodeBegin`. |
+| Units stay dead after episode reset | Rebuild with `RestoreAgentAtSpawn` (`SetAgentHealthFull` + `Idle`); `ReviveAgent` only fires movement events. |
+| Instant episode success loop | Primary must be alive after reset (`_primaryEnemyAliveAtEpisodeStart`). |
 | `terrain not Valid` timeout | Open `BaseScene` manually once; confirm terrain export / `Assets/status.json`. |
 | Port bind error | Change `cot_port` in `paths.local.yaml` or set `AGAMOTTO_COT_PORT`. |
 | Wrong team training | CoT types must be `a-f-*` (friendly) and `a-h-*` (hostile); `training_friendly_limit: 1` in manifest. |
