@@ -5,7 +5,7 @@ suite_name: agamotto_atd_eval_v1
 behavior_name: AGAMOTTO_RL
 
 # Shorter runs for suite iteration; override per experiment with max_steps if needed.
-default_max_steps: 1000000
+default_max_steps: 500000
 # Automated tests use Unity_Data CoT (no WinTAK GUI). Synthetic atd_default still available.
 default_scenario: unity_data_atd
 
