@@ -100,11 +100,17 @@ public class AGAMOTTO_ATD_Agent : RLAgent
     [Header("Episode reset")]
     [Tooltip("Steps after episode reset where leader-death terminal and squad death rewards are suppressed (avoids spawn crossfire).")]
     public int combatTerminalWarmupSteps = 12;
+    [Tooltip("End episode if the squad leader moves less than leaderStationaryMoveThresholdM for more than this many consecutive steps.")]
+    public int leaderStationaryMaxSteps = 100;
+    [Tooltip("Horizontal movement (m) per step below which the leader counts as stationary.")]
+    public float leaderStationaryMoveThresholdM = 0.1f;
     List<(RideID id, RideVector3 world)> _lockedFriendlySpawnWorld;
     List<(RideID id, RideVector3 world)> _lockedEnemySpawnWorld;
     /// <summary>Wingman horizontal offsets from leader (m), keyed by entity id; capped to <see cref="squadMaxMemberSpacingM"/>.</summary>
     List<(int entityId, double offsetX, double offsetY, double offsetZ)> _friendlySquadOffsets;
     bool _loggedSquadMoveThisEpisode;
+    Vector3 _leaderStationaryCheckPosition;
+    int _leaderStationarySteps;
 
     /// <summary>
     /// Issues a short leader path for the whole friendly tactical group via <see cref="IMovementSystem.MoveGroupPath"/> (RIDE grouped pathing).
@@ -588,6 +594,44 @@ public class AGAMOTTO_ATD_Agent : RLAgent
         RefreshSquadAliveBaselines(agentSystem);
         ResetEpisodeKillCounters();
         _loggedSquadMoveThisEpisode = false;
+        _leaderStationaryCheckPosition = GetAgentWorldPosition();
+        _leaderStationarySteps = 0;
+    }
+
+    /// <summary>
+    /// Tracks consecutive RL leader steps with negligible horizontal movement; ends episode after <see cref="leaderStationaryMaxSteps"/>.
+    /// </summary>
+    /// <returns>True if the episode was ended due to stationary leader.</returns>
+    bool CheckLeaderStationaryTermination()
+    {
+        if (leaderStationaryMaxSteps <= 0)
+            return false;
+
+        Vector3 leaderPos = GetAgentWorldPosition();
+        float hdx = leaderPos.x - _leaderStationaryCheckPosition.x;
+        float hdz = leaderPos.z - _leaderStationaryCheckPosition.z;
+        float horizontalDelta = Mathf.Sqrt(hdx * hdx + hdz * hdz);
+        float threshold = Mathf.Max(leaderStationaryMoveThresholdM, 1e-4f);
+
+        if (horizontalDelta < threshold)
+            _leaderStationarySteps++;
+        else
+            _leaderStationarySteps = 0;
+
+        _leaderStationaryCheckPosition = leaderPos;
+
+        if (_leaderStationarySteps <= leaderStationaryMaxSteps)
+            return false;
+
+        Debug.Log(
+            $"AGAMOTTO_ATD_Agent: Episode failure — leader stationary for {_leaderStationarySteps} steps "
+            + $"(limit={leaderStationaryMaxSteps}, last_delta={horizontalDelta:F3}m).");
+        AddReward(-0.25f * m_successReward);
+        NotifyTakTrainingOutcome(false, "leader_stationary");
+        DispatchTrainingResult(false);
+        suppressStepPunishmentThisAction = true;
+        EndEpisodeWithTrainingStats("leader_stationary");
+        return true;
     }
 
     void ResetEpisodeKillCounters()
@@ -894,6 +938,8 @@ public class AGAMOTTO_ATD_Agent : RLAgent
 
         previousPosition = GetAgentWorldPosition();
 
+        if (!inCombatWarmup && CheckLeaderStationaryTermination())
+            return;
     }
 
     public override void Heuristic(in ActionBuffers actionsOut)

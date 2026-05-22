@@ -364,9 +364,65 @@ namespace AGAMOTTO
         protected virtual void OnTerrainLoaded(WorldEventMarker marker, TerrainLoadedEvent e)
         {
             Debug.Log("Terrain Finished Loading");
+            // status.json "Valid" is polled by the eval suite; units must be allowed to spawn now,
+            // not only after CreateNavMesh finishes (that was racing ahead of CoT delivery).
+            simulationState.State = SimStateType.TerrainLoaded;
             ExportData.WriteStatus("Valid");
+        }
 
+        bool IsTerrainReadyForUnitSpawn() =>
+            simulationState.State == SimStateType.TerrainLoaded
+            || simulationState.State == SimStateType.Idle;
 
+        static bool IsEntityOrRouteCotPath(string fullPath)
+        {
+            if (string.IsNullOrEmpty(fullPath))
+                return false;
+            string p = fullPath.Replace('\\', '/').ToLowerInvariant();
+            return p.Contains("/entities/") || p.Contains("/routes/");
+        }
+
+        IEnumerator SpawnCotAfterTerrainReady(string cotFilePath)
+        {
+            const int maxFrames = 36000;
+            for (int i = 0; i < maxFrames && !IsTerrainReadyForUnitSpawn(); i++)
+                yield return null;
+
+            if (!IsTerrainReadyForUnitSpawn())
+            {
+                Debug.LogError($"AGAMOTTO: Timed out waiting for terrain before spawning from {cotFilePath}");
+                yield break;
+            }
+
+            yield return null;
+            ProcessCotFileFromPath(cotFilePath, deferIfNotReady: false);
+        }
+
+        void ProcessCotFileFromPath(string fullPath, bool deferIfNotReady = true)
+        {
+            if (!IsEntityOrRouteCotPath(fullPath))
+                return;
+
+            UnityMainThreadDispatcher.Instance().Enqueue(() =>
+            {
+                if (deferIfNotReady && !IsTerrainReadyForUnitSpawn())
+                {
+                    Debug.Log($"AGAMOTTO: Deferring CoT spawn until terrain is ready: {fullPath}");
+                    StartCoroutine(SpawnCotAfterTerrainReady(fullPath));
+                    return;
+                }
+
+                try
+                {
+                    XmlDocument doc = new XmlDocument();
+                    doc.Load(fullPath);
+                    ParseCotAndCreateEntity(doc);
+                }
+                catch (Exception ex)
+                {
+                    Debug.LogError($"AGAMOTTO: Failed to load CoT from {fullPath}: {ex.Message}");
+                }
+            });
         }
 
         bool CreatePath(string callsign, RideVector3[] path)
@@ -710,25 +766,16 @@ namespace AGAMOTTO
         private void OnChanged(object sender, FileSystemEventArgs e)
         {
             if (e.ChangeType != WatcherChangeTypes.Changed)
-            {
                 return;
-            }
 
             Debug.Log($"Changed: {e.FullPath}");
-            XmlDocument doc = new XmlDocument();
-            doc.Load(e.FullPath);
-            ParseCotAndCreateEntity(doc);
-
-
-
+            ProcessCotFileFromPath(e.FullPath);
         }
 
         private void OnCreated(object sender, FileSystemEventArgs e)
         {
-            string value = $"Created: {e.FullPath}";
-            XmlDocument doc = new XmlDocument();
-            doc.Load(e.FullPath);
-            ParseCotAndCreateEntity(doc);
+            Debug.Log($"Created: {e.FullPath}");
+            ProcessCotFileFromPath(e.FullPath);
         }
 
         private static void OnDeleted(object sender, FileSystemEventArgs e) =>
