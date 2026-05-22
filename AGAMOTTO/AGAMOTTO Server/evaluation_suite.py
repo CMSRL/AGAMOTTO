@@ -170,6 +170,7 @@ def start_mlagents_learn(
     results_dir: Path,
     *,
     timeout_wait_s: int = 5000,
+    time_scale: int = 50,
 ) -> subprocess.Popen:
     """Start mlagents-learn in the background; Unity connects when play mode starts."""
     results_dir.mkdir(parents=True, exist_ok=True)
@@ -179,6 +180,7 @@ def start_mlagents_learn(
         f"--run-id={run_id}",
         f"--results-dir={results_dir}",
         f"--timeout-wait={timeout_wait_s}",
+        f"--time-scale={time_scale}",
         "--force",
     ]
     print("[eval] mlagents-learn:", " ".join(cmd), flush=True)
@@ -314,6 +316,7 @@ def run_experiment(
                 run_id,
                 exp_results,
                 timeout_wait_s=timeout_wait_s,
+                time_scale=int(paths.get("mlagents_time_scale", 50)),
             )
             grace_s = float(paths.get("mlagents_startup_grace_s", 5.0))
             if grace_s > 0:

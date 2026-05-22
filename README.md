@@ -54,6 +54,7 @@ Full documentation: **[`AGAMOTTO/AGAMOTTO Server/README.md`](AGAMOTTO/AGAMOTTO%2
 | Setting | Value |
 |---------|--------|
 | Training steps per ablation | **500,000** (`evaluation/configs/*.yaml`) |
+| Unity time scale (training) | **50** (`mlagents_time_scale` in `paths.local.yaml`) |
 | Unity steps per episode | **5,000** (`AttackToDestroy` prefab `MaxStep`) |
 | Default scenario | Two CoT files in `Simulation/Assets/StreamingAssets/entities` |
 | RL training team | Friendly (`a-f-*`) only; hostiles spawn for combat |
