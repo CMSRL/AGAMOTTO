@@ -47,13 +47,15 @@ public class AGAMOTTO_ATD_Agent : RLAgent
     [Tooltip("Negative reward when a friendly squad member other than the RL leader dies.")]
     public float penaltyPerFriendlyWingmanDeath = 0.5f;
 
-    readonly HashSet<(int id, int version)> _enemyAlivePrevStep = new HashSet<(int, int)>();
-    readonly HashSet<(int id, int version)> _friendlyAlivePrevStep = new HashSet<(int, int)>();
+    readonly HashSet<int> _enemyAliveEntityIdsPrevStep = new HashSet<int>();
+    readonly HashSet<int> _friendlyAliveEntityIdsPrevStep = new HashSet<int>();
 
     /// <summary>Tracked hostiles killed this episode (TensorBoard: AGAMOTTO/Enemies Killed Per Episode).</summary>
     int _episodeEnemiesKilled;
     /// <summary>Wingmen + RL leader deaths this episode (TensorBoard: AGAMOTTO/Friendlies Lost Per Episode).</summary>
     int _episodeFriendliesLost;
+    /// <summary>Primary enemy was alive after <see cref="OnEpisodeBegin"/> reset (prevents success loop if hostiles stay dead).</summary>
+    bool _primaryEnemyAliveAtEpisodeStart;
 
     private Vector3 previousPosition;
     private int episodeCounter = 0;
@@ -127,6 +129,31 @@ public class AGAMOTTO_ATD_Agent : RLAgent
     }
 
     static int EntityIdKey(RideID id) => id.id;
+
+    /// <summary>Resolve current <see cref="RideID.version"/> from sim rosters (spawn snapshots often lag after deaths).</summary>
+    RideID ResolveLiveRideId(RideID snapshotId)
+    {
+        if (!IsValidRideId(snapshotId))
+            return snapshotId;
+
+        int entityId = snapshotId.id;
+        foreach (Team team in new[] { Team.Blue, Team.Red })
+        {
+            IEnumerable<RideID> roster = api.scenarioSystem.GetAgents(team);
+            if (roster == null)
+                continue;
+            foreach (RideID id in roster)
+            {
+                if (id.id == entityId)
+                    return id;
+            }
+        }
+
+        return snapshotId;
+    }
+
+    RideID OperationRideId(RideID snapshotId) =>
+        SameRideEntityId(snapshotId, agent) ? agent : ResolveLiveRideId(snapshotId);
 
     void BuildFriendlySquadOffsetsFromSpawns()
     {
@@ -273,11 +300,14 @@ public class AGAMOTTO_ATD_Agent : RLAgent
         {
             if (!IsValidRideId(id))
                 return;
-            if (agentSystem.GetAgentTeam(id) != friendlyTeam)
+            RideID live = OperationRideId(id);
+            if (agentSystem.GetAgentTeam(live) != friendlyTeam)
                 return;
-            if (agentSystem.IsAgentDead(id))
+            if (agentSystem.IsAgentDead(live))
+                agentSystem.ReviveAgent(live);
+            if (agentSystem.IsAgentDead(live))
                 return;
-            movementSystem.MoveTeleport(id, dest);
+            movementSystem.MoveTeleport(live, dest);
             moved++;
         }
 
@@ -451,8 +481,8 @@ public class AGAMOTTO_ATD_Agent : RLAgent
     }
 
     /// <summary>
-    /// Revives everyone first, then teleports (wingmen then leader). Uses <see cref="agent"/> for leader ops when
-    /// snapshot <see cref="RideID.version"/> lags RIDE, otherwise dead-leader teleports are skipped and revive never sticks.
+    /// Revives everyone first, then teleports (wingmen then leader). Resolves live <see cref="RideID"/> handles so
+    /// stale snapshot versions still revive and reposition after episode end.
     /// </summary>
     void TeleportTeamToSpawnWorld(IEnumerable<(RideID id, RideVector3 world)> spawns)
     {
@@ -467,7 +497,7 @@ public class AGAMOTTO_ATD_Agent : RLAgent
             var pair = list[i];
             if (!IsValidRideId(pair.id))
                 continue;
-            RideID opId = SameRideEntityId(pair.id, agent) ? agent : pair.id;
+            RideID opId = OperationRideId(pair.id);
             if (agentSystem.IsAgentDead(opId))
                 agentSystem.ReviveAgent(opId);
         }
@@ -477,7 +507,10 @@ public class AGAMOTTO_ATD_Agent : RLAgent
             var pair = list[i];
             if (!IsValidRideId(pair.id) || SameRideEntityId(pair.id, agent))
                 continue;
-            movementSystem.MoveTeleport(pair.id, pair.world);
+            RideID live = OperationRideId(pair.id);
+            if (agentSystem.IsAgentDead(live))
+                agentSystem.ReviveAgent(live);
+            movementSystem.MoveTeleport(live, pair.world);
         }
 
         for (int i = 0; i < list.Count; i++)
@@ -489,6 +522,32 @@ public class AGAMOTTO_ATD_Agent : RLAgent
                 agentSystem.ReviveAgent(agent);
             movementSystem.MoveTeleport(agent, pair.world);
         }
+    }
+
+    RideVector3 SpawnWorldForEntity(IEnumerable<(RideID id, RideVector3 world)> spawns, RideID entity)
+    {
+        if (spawns != null)
+        {
+            foreach (var pair in spawns)
+            {
+                if (SameRideEntityId(pair.id, entity))
+                    return pair.world;
+            }
+        }
+
+        return SameRideEntityId(entity, m_enemy) ? m_enemyStartingPosition : m_startingPosition;
+    }
+
+    void ResetPrimaryEnemyForNewEpisode(IAgentSystem agentSystem, IMovementSystem movementSystem)
+    {
+        if (!HasAssignedEnemy(m_enemy))
+            return;
+
+        m_enemy = ResolveLiveRideId(m_enemy);
+        RideVector3 spawn = SpawnWorldForEntity(EnemySpawnsForReset(), m_enemy);
+        if (agentSystem.IsAgentDead(m_enemy))
+            agentSystem.ReviveAgent(m_enemy);
+        movementSystem.MoveTeleport(m_enemy, spawn);
     }
 
     /// <summary>Ensures the RL-controlled leader is in the snapshot so squad reset always moves them to <see cref="m_startingPosition"/>.</summary>
@@ -555,12 +614,8 @@ public class AGAMOTTO_ATD_Agent : RLAgent
             TeleportTeamToSpawnWorld(enemySpawns);
             Debug.Log($"AGAMOTTO_ATD_Agent: Teleported hostile squad to spawn anchors.");
         }
-        else if (HasAssignedEnemy(m_enemy))
-        {
-            if (agentSystem.IsAgentDead(m_enemy))
-                agentSystem.ReviveAgent(m_enemy);
-            movementSystem.MoveTeleport(m_enemy, m_enemyStartingPosition);
-        }
+
+        ResetPrimaryEnemyForNewEpisode(agentSystem, movementSystem);
 
         SyncLeaderUnityTransformFromRide();
 
@@ -583,6 +638,15 @@ public class AGAMOTTO_ATD_Agent : RLAgent
 
         if ((enemySpawns == null || !enemySpawns.Any()) && !HasAssignedEnemy(m_enemy))
             Debug.LogWarning("AGAMOTTO_ATD_Agent: m_enemy is not assigned; skipping enemy reset.");
+
+        _primaryEnemyAliveAtEpisodeStart =
+            HasAssignedEnemy(m_enemy) && !agentSystem.IsAgentDead(m_enemy);
+        if (HasAssignedEnemy(m_enemy) && !_primaryEnemyAliveAtEpisodeStart)
+        {
+            Debug.LogWarning(
+                $"AGAMOTTO_ATD_Agent: Primary enemy id={m_enemy.id} still dead after episode reset; "
+                + "mission success will not fire until revived.");
+        }
 
         EnableRlCombatEngagement();
         RefreshSquadAliveBaselines(agentSystem);
@@ -625,7 +689,7 @@ public class AGAMOTTO_ATD_Agent : RLAgent
     /// <summary>Resets per-episode tracking so squad death rewards only fire on transitions after spawn.</summary>
     void RefreshSquadAliveBaselines(IAgentSystem agentSystem)
     {
-        _enemyAlivePrevStep.Clear();
+        _enemyAliveEntityIdsPrevStep.Clear();
         var enemySpawns = EnemySpawnsForReset();
         if (enemySpawns != null)
         {
@@ -633,12 +697,13 @@ public class AGAMOTTO_ATD_Agent : RLAgent
             {
                 if (!IsValidRideId(pair.id))
                     continue;
-                if (!agentSystem.IsAgentDead(pair.id))
-                    _enemyAlivePrevStep.Add(AliveKey(pair.id));
+                RideID live = OperationRideId(pair.id);
+                if (!agentSystem.IsAgentDead(live))
+                    _enemyAliveEntityIdsPrevStep.Add(EntityIdKey(live));
             }
         }
 
-        _friendlyAlivePrevStep.Clear();
+        _friendlyAliveEntityIdsPrevStep.Clear();
         var friendlySpawns = FriendlySpawnsForReset();
         if (friendlySpawns != null)
         {
@@ -646,8 +711,9 @@ public class AGAMOTTO_ATD_Agent : RLAgent
             {
                 if (!IsValidRideId(pair.id))
                     continue;
-                if (!agentSystem.IsAgentDead(pair.id))
-                    _friendlyAlivePrevStep.Add(AliveKey(pair.id));
+                RideID live = OperationRideId(pair.id);
+                if (!agentSystem.IsAgentDead(live))
+                    _friendlyAliveEntityIdsPrevStep.Add(EntityIdKey(live));
             }
         }
     }
@@ -660,14 +726,15 @@ public class AGAMOTTO_ATD_Agent : RLAgent
         {
             foreach (var pair in enemySpawns)
             {
-                RideID id = pair.id;
+                RideID id = OperationRideId(pair.id);
                 if (!IsValidRideId(id))
                     continue;
                 bool aliveNow = !agentSystem.IsAgentDead(id);
-                bool alivePrev = _enemyAlivePrevStep.Contains(AliveKey(id));
+                int entityKey = EntityIdKey(id);
+                bool alivePrev = _enemyAliveEntityIdsPrevStep.Contains(entityKey);
                 if (!alivePrev || aliveNow)
                     continue;
-                bool isPrimary = HasAssignedEnemy(m_enemy) && SameRideId(id, m_enemy);
+                bool isPrimary = HasAssignedEnemy(m_enemy) && SameRideEntityId(id, m_enemy);
                 _episodeEnemiesKilled++;
                 if (isPrimary)
                     Debug.Log($"AGAMOTTO_ATD_Agent: Enemy (primary / mission target) killed id={id.id} v={id.version}.");
@@ -679,13 +746,14 @@ public class AGAMOTTO_ATD_Agent : RLAgent
                 }
             }
 
-            _enemyAlivePrevStep.Clear();
+            _enemyAliveEntityIdsPrevStep.Clear();
             foreach (var pair in enemySpawns)
             {
                 if (!IsValidRideId(pair.id))
                     continue;
-                if (!agentSystem.IsAgentDead(pair.id))
-                    _enemyAlivePrevStep.Add(AliveKey(pair.id));
+                RideID live = OperationRideId(pair.id);
+                if (!agentSystem.IsAgentDead(live))
+                    _enemyAliveEntityIdsPrevStep.Add(EntityIdKey(live));
             }
         }
 
@@ -694,12 +762,13 @@ public class AGAMOTTO_ATD_Agent : RLAgent
         {
             foreach (var pair in friendlySpawns)
             {
-                RideID id = pair.id;
+                RideID id = OperationRideId(pair.id);
                 if (!IsValidRideId(id))
                     continue;
                 bool isLeader = SameRideEntityId(id, agent);
                 bool aliveNow = !agentSystem.IsAgentDead(id);
-                bool alivePrev = _friendlyAlivePrevStep.Contains(AliveKey(id));
+                int entityKey = EntityIdKey(id);
+                bool alivePrev = _friendlyAliveEntityIdsPrevStep.Contains(entityKey);
                 if (!alivePrev || aliveNow || isLeader)
                     continue;
                 _episodeFriendliesLost++;
@@ -708,13 +777,14 @@ public class AGAMOTTO_ATD_Agent : RLAgent
                 Debug.Log($"AGAMOTTO_ATD_Agent: Friendly wingman killed id={id.id} v={id.version} penalty={penaltyPerFriendlyWingmanDeath}.");
             }
 
-            _friendlyAlivePrevStep.Clear();
+            _friendlyAliveEntityIdsPrevStep.Clear();
             foreach (var pair in friendlySpawns)
             {
                 if (!IsValidRideId(pair.id))
                     continue;
-                if (!agentSystem.IsAgentDead(pair.id))
-                    _friendlyAlivePrevStep.Add(AliveKey(pair.id));
+                RideID live = OperationRideId(pair.id);
+                if (!agentSystem.IsAgentDead(live))
+                    _friendlyAliveEntityIdsPrevStep.Add(EntityIdKey(live));
             }
         }
     }
@@ -732,7 +802,7 @@ public class AGAMOTTO_ATD_Agent : RLAgent
         {
             if (!IsValidRideId(pair.id))
                 continue;
-            if (!agentSystem.IsAgentDead(pair.id))
+            if (!agentSystem.IsAgentDead(OperationRideId(pair.id)))
                 alive++;
         }
 
@@ -751,7 +821,7 @@ public class AGAMOTTO_ATD_Agent : RLAgent
             if (!IsValidRideId(pair.id) || SameRideEntityId(pair.id, agent))
                 continue;
             wing++;
-            if (!agentSystem.IsAgentDead(pair.id))
+            if (!agentSystem.IsAgentDead(OperationRideId(pair.id)))
                 alive++;
         }
 
@@ -819,7 +889,10 @@ public class AGAMOTTO_ATD_Agent : RLAgent
         if (!inCombatWarmup)
             ApplySquadCombatDeathRewards(agentSystem);
 
-        if (!inCombatWarmup && HasAssignedEnemy(m_enemy) && agentSystem.IsAgentDead(m_enemy))
+        if (!inCombatWarmup
+            && _primaryEnemyAliveAtEpisodeStart
+            && HasAssignedEnemy(m_enemy)
+            && agentSystem.IsAgentDead(m_enemy))
         {
             Debug.Log($"AGAMOTTO_ATD_Agent: Episode success — primary enemy eliminated id={m_enemy.id} v={m_enemy.version}.");
             AddReward(m_successReward);

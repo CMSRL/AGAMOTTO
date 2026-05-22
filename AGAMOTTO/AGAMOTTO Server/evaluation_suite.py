@@ -371,7 +371,7 @@ def run_experiment(
         if not skip_train and train_proc is not None:
             wall_timeout_s = float(paths.get("train_wall_timeout_s", 0))
             if wall_timeout_s <= 0:
-                wall_timeout_s = max(3600.0, 1_000_000 * 0.08 + 600.0)
+                wall_timeout_s = max(3600.0, 500_000 * 0.08 + 600.0)
             record["train_wall_timeout_s"] = wall_timeout_s
             print(
                 f"[eval] Waiting for mlagents-learn (already running; wall_timeout={wall_timeout_s / 60:.0f} min)...",
