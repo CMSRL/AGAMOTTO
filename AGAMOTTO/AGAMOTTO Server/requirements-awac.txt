@@ -1,0 +1,5 @@
+# AWAC trainer + ML-Agents Python (Unity Editor attach)
+torch>=2.0
+mlagents>=1.0.0
+pyyaml>=6.0
+numpy>=1.24,<2.0

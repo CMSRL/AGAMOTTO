@@ -1,7 +1,7 @@
 """
 Shared AGAMOTTO orchestration: Unity play-mode launch, terrain readiness, CoT TCP ingest.
 
-Used by AGAMOTTO Orchestrator.py (interactive CoT server) and evaluation_suite.py (batch RL runs).
+Used by AGAMOTTO Orchestrator.py (interactive CoT server and optional Unity_Data replay).
 """
 
 from __future__ import annotations
@@ -38,7 +38,7 @@ def resolve_cot_port(explicit: Optional[int] = None) -> int:
 def format_bind_error(host: str, port: int, ex: OSError) -> str:
     return (
         f"Cannot bind CoT server to {host}:{port}: {ex}\n"
-        "  • Close any other AGAMOTTO Orchestrator / evaluation_suite process.\n"
+        "  • Close any other AGAMOTTO Orchestrator process.\n"
         "  • In PowerShell: netstat -ano | findstr :{port}\n"
         "  • Try another port: $env:AGAMOTTO_COT_PORT = \"55032\" "
         "(set the same port in the WinTAK plugin Orchestrator field).\n"
@@ -289,29 +289,6 @@ def should_emit_unity_log_line(line: str) -> bool:
     return False
 
 
-def _stream_subprocess_output(
-    proc: subprocess.Popen,
-    prefix: str,
-    *,
-    line_filter: Optional[Callable[[str], bool]] = None,
-    collapse: bool = False,
-) -> threading.Thread:
-    def _reader() -> None:
-        if proc.stdout is None:
-            return
-        for raw in proc.stdout:
-            line = raw.rstrip("\r\n")
-            if collapse:
-                line = _collapse_whitespace(line)
-            if line_filter is not None and not line_filter(line):
-                continue
-            print(f"{prefix}{line}", flush=True)
-
-    t = threading.Thread(target=_reader, daemon=True)
-    t.start()
-    return t
-
-
 def run_async_in_thread(coro) -> threading.Thread:
     def thread_target():
         loop = asyncio.new_event_loop()
@@ -321,16 +298,6 @@ def run_async_in_thread(coro) -> threading.Thread:
     t = threading.Thread(target=thread_target, daemon=True)
     t.start()
     return t
-
-
-def clear_terrain_status(status_path: Optional[Path] = None) -> None:
-    """Remove stale status.json so a new Unity session cannot appear ready before terrain loads."""
-    path = status_path or default_status_json()
-    try:
-        if path.exists():
-            path.unlink()
-    except OSError as ex:
-        print(f"[orchestrator] WARN could not clear terrain status {path}: {ex}", flush=True)
 
 
 def wait_for_terrain_valid(
@@ -391,35 +358,6 @@ def send_cot_file(host: str, port: int, xml_path: Path) -> None:
     send_cot_payload(host, port, xml_path.read_text(encoding="utf-8"))
 
 
-def spawn_training_entities_from_scenario(
-    scenario: Dict[str, Any],
-    host: str = DEFAULT_HOST,
-    port: int = DEFAULT_PORT,
-    delay_s: float = 1.0,
-    streaming_root: Optional[Path] = None,
-) -> None:
-    """Write CoT XML to StreamingAssets and push over TCP so Unity creates units (no WinTAK)."""
-    entries = scenario.get("entities", [])
-    spawn_cot_entries(entries, host=host, port=port, delay_s=delay_s, streaming_root=streaming_root)
-
-
-def prune_streaming_entity_files(
-    streaming_root: Optional[Path],
-    keep_paths: list,
-) -> int:
-    """Remove extra entity XML under StreamingAssets/entities so Unity only sees intended CoT."""
-    dirs = ensure_streaming_dirs(streaming_root)
-    keep = {Path(p).resolve() for p in keep_paths if p}
-    removed = 0
-    for path in dirs["entities"].glob("*.xml"):
-        if path.resolve() in keep:
-            continue
-        path.unlink()
-        removed += 1
-        print(f"[orchestrator] pruned extra entity CoT: {path.name}")
-    return removed
-
-
 def spawn_cot_entries(
     entries: list,
     host: str = DEFAULT_HOST,
@@ -427,41 +365,22 @@ def spawn_cot_entries(
     delay_s: float = 1.0,
     streaming_root: Optional[Path] = None,
     *,
-    replay_in_place: bool = False,
     send_tcp: bool = True,
     persist_tcp_to_streaming: bool = True,
-    prune_extra_entities: bool = False,
 ) -> None:
-    """Push CoT spawn dicts to Unity.
-
-    When replay_in_place is True, rewrite the existing source XML paths only (no new uid.xml files).
-    Unity's FileSystemWatcher picks up the change and spawns one squad per message.
-    """
+    """Write CoT spawn dicts to StreamingAssets and optionally push over TCP."""
     dirs = ensure_streaming_dirs(streaming_root)
-    if prune_extra_entities:
-        prune_streaming_entity_files(streaming_root, [e.get("source") for e in entries])
 
     for ent in entries:
         uid = ent["uid"]
         kind = ent.get("kind", "entity")
-        source = ent.get("source")
         cot_xml = ent["cot_xml"]
 
-        if replay_in_place and source:
-            xml_path = Path(source)
-            if not xml_path.is_absolute():
-                xml_path = (dirs["entities"] / xml_path.name).resolve()
-        else:
-            subdir = dirs["routes"] if kind == "route" else dirs["entities"]
-            xml_path = subdir / f"{uid}.xml"
+        subdir = dirs["routes"] if kind == "route" else dirs["entities"]
+        xml_path = subdir / f"{uid}.xml"
 
         xml_path.parent.mkdir(parents=True, exist_ok=True)
         xml_path.write_text(cot_xml, encoding="utf-8")
-        if replay_in_place:
-            try:
-                os.utime(xml_path, None)
-            except OSError:
-                pass
         time.sleep(delay_s)
 
         if send_tcp:
@@ -653,54 +572,3 @@ def launch_unity_play_mode(
             minimal_logs=minimal_logs,
         )
     )
-
-
-def launch_unity_play_mode_process(
-    unity_exe: str,
-    project_path: str,
-    scene_path: str,
-    batchmode: bool = False,
-    minimal_logs: bool = False,
-) -> subprocess.Popen:
-    """Start Unity and return the process handle so callers can shut it down after training."""
-    cmd = build_unity_play_command(unity_exe, project_path, scene_path, batchmode=batchmode)
-    proc = subprocess.Popen(
-        cmd,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-    )
-    line_filter = should_emit_unity_log_line if minimal_logs else None
-    _stream_subprocess_output(
-        proc,
-        "[unity] ",
-        line_filter=line_filter,
-        collapse=minimal_logs,
-    )
-    return proc
-
-
-def shutdown_unity_process(
-    proc: Optional[subprocess.Popen],
-    *,
-    timeout_s: float = 25.0,
-    label: str = "Unity",
-) -> None:
-    if proc is None:
-        return
-    if proc.poll() is not None:
-        return
-    print(f"[eval] Closing {label} (pid={proc.pid})...", flush=True)
-    proc.terminate()
-    try:
-        proc.wait(timeout=timeout_s)
-        print(f"[eval] {label} exited (code={proc.returncode})", flush=True)
-    except subprocess.TimeoutExpired:
-        print(f"[eval] {label} did not exit in {timeout_s}s; killing...", flush=True)
-        proc.kill()
-        try:
-            proc.wait(timeout=10)
-        except subprocess.TimeoutExpired:
-            pass
