@@ -10,6 +10,7 @@ using System.Collections.Generic;
 using System.Linq;
 using Unity.MLAgents;
 using Unity.MLAgents.Actuators;
+using Unity.MLAgents.Policies;
 using Unity.MLAgents.Sensors;
 using UnityEngine;
 using UnityEngine.InputSystem;
@@ -109,6 +110,201 @@ public class AGAMOTTO_ATD_Agent : RLAgent
     /// <summary>Wingman horizontal offsets from leader (m), keyed by entity id; capped to <see cref="squadMaxMemberSpacingM"/>.</summary>
     List<(int entityId, double offsetX, double offsetY, double offsetZ)> _friendlySquadOffsets;
     bool _loggedSquadMoveThisEpisode;
+
+    [Header("Hybrid AWAC")]
+    [Tooltip("AWAC advantage temperature λ from active_run.json.")]
+    public float awacLambda = 1.0f;
+    [Tooltip("Blend toward expert route action during online AWAC (0 = policy only).")]
+    public float expertBlendDuringOnline = 0f;
+    [Tooltip("Max RL steps in expert-baseline phase before online AWAC.")]
+    public int expertPhaseMaxSteps = 2000;
+    [Tooltip("Horizontal distance (m) to advance to next expert waypoint.")]
+    public float expertWaypointReachRadiusM = 15f;
+
+    bool _awacHybridEnabled;
+    bool _expertBaselineComplete;
+    bool _recordExpertTransitions;
+    int _expertWaypointIndex;
+    Vector3[] _expertWaypointsWorld;
+    readonly float[] _cachedObservation = new float[AGAMOTTO_ExpertTrajectoryRecorder.ObservationSize];
+    BehaviorParameters _behaviorParameters;
+
+    void Awake()
+    {
+        _behaviorParameters = GetComponent<BehaviorParameters>();
+    }
+
+    void SyncAwacBehaviorMode()
+    {
+        if (_behaviorParameters == null)
+            return;
+        if (_awacHybridEnabled && IsExpertBaselinePhase())
+            _behaviorParameters.BehaviorType = BehaviorType.HeuristicOnly;
+        else
+            _behaviorParameters.BehaviorType = BehaviorType.Default;
+    }
+
+    public void ApplyAwacRunConfig(
+        bool awacEnabled,
+        float lambda,
+        int expertMaxSteps,
+        float onlineExpertBlend,
+        string expertTrajectoryPath,
+        string runId,
+        bool hybridDispatchMode)
+    {
+        _awacHybridEnabled = awacEnabled || hybridDispatchMode || AGAMOTTO_HybridAwacHub.IsHybridDispatch;
+        awacLambda = lambda > 0f ? lambda : 1f;
+        expertPhaseMaxSteps = expertMaxSteps > 0 ? expertMaxSteps : 2000;
+        expertBlendDuringOnline = Mathf.Clamp01(onlineExpertBlend);
+        _expertBaselineComplete = !_awacHybridEnabled;
+        _recordExpertTransitions = _awacHybridEnabled;
+
+        if (_awacHybridEnabled)
+        {
+            AGAMOTTO_HybridAwacHub.EnableHybridDispatch();
+            if (AGAMOTTO_HybridAwacHub.TryGetActiveExpertWaypoints(out var waypoints))
+                _expertWaypointsWorld = waypoints;
+            string leaderCallsign = AGAMOTTO_HybridAwacHub.ActiveLeaderCallsign ?? "leader";
+            AGAMOTTO_ExpertTrajectoryRecorder.Configure(
+                string.IsNullOrEmpty(runId) ? "hybrid_awac" : runId,
+                leaderCallsign,
+                true);
+            SyncAwacBehaviorMode();
+            Debug.Log(
+                $"AGAMOTTO_ATD_Agent: hybrid AWAC enabled λ={awacLambda} expertMaxSteps={expertPhaseMaxSteps}");
+        }
+        else if (!string.IsNullOrEmpty(expertTrajectoryPath))
+        {
+            Debug.Log($"AGAMOTTO_ATD_Agent: expert trajectory path configured ({expertTrajectoryPath})");
+        }
+    }
+
+    bool IsExpertBaselinePhase() =>
+        _awacHybridEnabled
+        && !_expertBaselineComplete
+        && AGAMOTTO_HybridAwacHub.CurrentPhase == AGAMOTTO_HybridAwacHub.AwacPhase.ExpertBaseline;
+
+    void RefreshExpertWaypointsFromHub()
+    {
+        if (_expertWaypointsWorld == null || _expertWaypointsWorld.Length < 2)
+        {
+            if (AGAMOTTO_HybridAwacHub.TryGetActiveExpertWaypoints(out var waypoints))
+                _expertWaypointsWorld = waypoints;
+        }
+    }
+
+    bool TryComputeExpertContinuousAction(out float xmov, out float zmov)
+    {
+        xmov = 0f;
+        zmov = 0f;
+        RefreshExpertWaypointsFromHub();
+        if (_expertWaypointsWorld == null || _expertWaypointsWorld.Length == 0)
+            return false;
+
+        if (_expertWaypointIndex >= _expertWaypointsWorld.Length)
+            return false;
+
+        Vector3 pos = GetAgentWorldPosition();
+        Vector3 target = _expertWaypointsWorld[_expertWaypointIndex];
+        Vector3 to = target - pos;
+        to.y = 0f;
+        float reach = Mathf.Max(expertWaypointReachRadiusM, 1f);
+        if (to.sqrMagnitude <= reach * reach)
+        {
+            _expertWaypointIndex++;
+            if (_expertWaypointIndex >= _expertWaypointsWorld.Length)
+                return false;
+            target = _expertWaypointsWorld[_expertWaypointIndex];
+            to = target - pos;
+            to.y = 0f;
+        }
+
+        if (to.sqrMagnitude < MinMoveDirectionSqr)
+            return false;
+
+        Vector3 dir = to.normalized;
+        xmov = Mathf.Clamp(dir.x, -1f, 1f);
+        zmov = Mathf.Clamp(dir.z, -1f, 1f);
+        return true;
+    }
+
+    bool ExpertRouteComplete()
+    {
+        RefreshExpertWaypointsFromHub();
+        return _expertWaypointsWorld != null
+            && _expertWaypointsWorld.Length > 0
+            && _expertWaypointIndex >= _expertWaypointsWorld.Length;
+    }
+
+    void MaybeCompleteExpertBaselinePhase()
+    {
+        if (!IsExpertBaselinePhase())
+            return;
+        if (!ExpertRouteComplete() && stepCount < expertPhaseMaxSteps)
+            return;
+
+        _expertBaselineComplete = true;
+        AGAMOTTO_HybridAwacHub.BeginOnlineAwacPhase();
+        SyncAwacBehaviorMode();
+    }
+
+    void SnapshotObservation(VectorSensor sensor = null)
+    {
+        // Mirror CollectObservations layout for offline AWAC buffer export.
+        IAgentSystem agentSystem = Globals.api.agentSystem;
+        Vector3 agentPos = GetAgentWorldPosition();
+        float R = Mathf.Max(observationMapRadiusM, 1f);
+        float H = Mathf.Max(observationHeightScaleM, 1f);
+
+        RideVector3 enemyRv;
+        if (HasAssignedEnemy(m_enemy))
+            enemyRv = api.GetSystem<ITransformSystem>().GetPosition(m_enemy);
+        else
+            enemyRv = new RideVector3(agentPos.x, agentPos.y, agentPos.z);
+
+        Vector3 enemyWorld = new Vector3((float)enemyRv.x, (float)enemyRv.y, (float)enemyRv.z);
+        float relX = enemyWorld.x - agentPos.x;
+        float relZ = enemyWorld.z - agentPos.z;
+        float relY = enemyWorld.y - agentPos.y;
+
+        _cachedObservation[0] = Mathf.Clamp(relX / R, -1f, 1f);
+        _cachedObservation[1] = Mathf.Clamp(relZ / R, -1f, 1f);
+        _cachedObservation[2] = Mathf.Clamp(relY / H, -1f, 1f);
+        float dist = Vector3.Distance(agentPos, enemyWorld);
+        _cachedObservation[3] = Mathf.Clamp01(dist / R);
+        float theta = Mathf.Atan2(relZ, relX);
+        _cachedObservation[4] = Mathf.Sin(theta);
+        _cachedObservation[5] = Mathf.Cos(theta);
+        _cachedObservation[6] = HasAssignedEnemy(m_enemy) && !agentSystem.IsAgentDead(m_enemy) ? 1f : 0f;
+        _cachedObservation[7] = GetEnemySquadAliveRatio(agentSystem);
+        _cachedObservation[8] = GetFriendlyWingmanAliveRatio(agentSystem);
+        _cachedObservation[9] = MaxStep > 0 ? Mathf.Clamp01((float)stepCount / MaxStep) : 0f;
+    }
+
+    void RecordExpertTransitionIfNeeded(
+        float rewardAtStepStart,
+        float policyX,
+        float policyZ,
+        float expertX,
+        float expertZ,
+        bool done)
+    {
+        if (!_recordExpertTransitions || !IsExpertBaselinePhase())
+            return;
+
+        float stepReward = GetCumulativeReward() - rewardAtStepStart;
+        var policy = new[] { policyX, policyZ };
+        var expert = new[] { expertX, expertZ };
+        AGAMOTTO_ExpertTrajectoryRecorder.RecordTransition(
+            stepCount,
+            _cachedObservation,
+            policy,
+            expert,
+            stepReward,
+            done,
+            GetCumulativeReward());
+    }
 
     /// <summary>
     /// Issues a short leader path for the whole friendly tactical group via <see cref="IMovementSystem.MoveGroupPath"/> (RIDE grouped pathing).
@@ -693,6 +889,24 @@ public class AGAMOTTO_ATD_Agent : RLAgent
         RefreshSquadAliveBaselines(agentSystem);
         ResetEpisodeKillCounters();
         _loggedSquadMoveThisEpisode = false;
+
+        if (_awacHybridEnabled)
+        {
+            if (AGAMOTTO_HybridAwacHub.SessionExpertBaselineComplete)
+            {
+                _expertBaselineComplete = true;
+            }
+            else
+            {
+                _expertBaselineComplete = false;
+                _expertWaypointIndex = 0;
+                AGAMOTTO_HybridAwacHub.RestoreExpertBaselinePhaseIfNeeded();
+                AGAMOTTO_ExpertTrajectoryRecorder.OnExpertEpisodeBegin();
+                if (AGAMOTTO_HybridAwacHub.TryGetActiveExpertWaypoints(out var waypoints))
+                    _expertWaypointsWorld = waypoints;
+            }
+            SyncAwacBehaviorMode();
+        }
     }
 
     void ResetEpisodeKillCounters()
@@ -874,11 +1088,12 @@ public class AGAMOTTO_ATD_Agent : RLAgent
     /// <summary>
     /// v2b vector (10): rel enemy xz (2), rel height (1), dist primary (1), bearing sin/cos (2),
     /// primary alive (1), enemy squad alive ratio (1), wingman alive ratio (1), step fraction (1).
-    /// Must match <c>BehaviorParameters.VectorObservationSize</c> (plus any base <see cref="RLAgent"/> extras).
+    /// Must match <c>BehaviorParameters.VectorObservationSize</c> and expert buffer (10).
     /// </summary>
     public override void CollectObservations(VectorSensor sensor)
     {
-        base.CollectObservations(sensor);
+        // Do not call base.CollectObservations — RIDE RLAgent adds extra dims that are not
+        // in the expert buffer (SnapshotObservation) or BehaviorParameters.VectorObservationSize.
 
         IAgentSystem agentSystem = Globals.api.agentSystem;
         Vector3 agentPos = GetAgentWorldPosition();
@@ -927,6 +1142,8 @@ public class AGAMOTTO_ATD_Agent : RLAgent
         IAgentSystem agentSystem = Globals.api.agentSystem;
         SyncCombatForCurrentStep();
         bool inCombatWarmup = stepCount <= combatTerminalWarmupSteps;
+        float rewardAtStepStart = GetCumulativeReward();
+        SnapshotObservation();
 
         if (!inCombatWarmup)
             ApplySquadCombatDeathRewards(agentSystem);
@@ -941,6 +1158,7 @@ public class AGAMOTTO_ATD_Agent : RLAgent
             NotifyTakTrainingOutcome(true, "primary_enemy_killed");
             DispatchTrainingResult(true);
             suppressStepPunishmentThisAction = true;
+            RecordExpertTransitionIfNeeded(rewardAtStepStart, 0f, 0f, 0f, 0f, true);
             EndEpisodeWithTrainingStats("primary_enemy_killed");
             return;
         }
@@ -954,12 +1172,33 @@ public class AGAMOTTO_ATD_Agent : RLAgent
             NotifyTakTrainingOutcome(false, "leader_killed");
             DispatchTrainingResult(false);
             suppressStepPunishmentThisAction = true;
+            RecordExpertTransitionIfNeeded(rewardAtStepStart, 0f, 0f, 0f, 0f, true);
             EndEpisodeWithTrainingStats("leader_killed");
             return;
         }
 
-        float xmov = (float)System.Math.Tanh(actions.ContinuousActions[0]);
-        float zmov = (float)System.Math.Tanh(actions.ContinuousActions[1]);
+        float policyX = (float)System.Math.Tanh(actions.ContinuousActions[0]);
+        float policyZ = (float)System.Math.Tanh(actions.ContinuousActions[1]);
+        float expertX = policyX;
+        float expertZ = policyZ;
+        bool hasExpert = TryComputeExpertContinuousAction(out expertX, out expertZ);
+
+        float xmov = policyX;
+        float zmov = policyZ;
+        if (IsExpertBaselinePhase() && hasExpert)
+        {
+            xmov = expertX;
+            zmov = expertZ;
+        }
+        else if (_awacHybridEnabled
+            && AGAMOTTO_HybridAwacHub.SessionExpertBaselineComplete
+            && expertBlendDuringOnline > 0f
+            && hasExpert)
+        {
+            float blend = expertBlendDuringOnline;
+            xmov = Mathf.Lerp(policyX, expertX, blend);
+            zmov = Mathf.Lerp(policyZ, expertZ, blend);
+        }
 
         Vector3 rawMove = new Vector3(xmov, 0f, zmov);
         if (rawMove.sqrMagnitude >= MinMoveDirectionSqr)
@@ -982,7 +1221,11 @@ public class AGAMOTTO_ATD_Agent : RLAgent
         }
 
         if (!HasAssignedEnemy(m_enemy))
+        {
+            RecordExpertTransitionIfNeeded(rewardAtStepStart, policyX, policyZ, expertX, expertZ, false);
+            MaybeCompleteExpertBaselinePhase();
             return;
+        }
 
         RideVector3 enemyPos = api.GetSystem<ITransformSystem>().GetPosition(m_enemy);
         Vector3 agentWorld = GetAgentWorldPosition();
@@ -1004,16 +1247,26 @@ public class AGAMOTTO_ATD_Agent : RLAgent
             DispatchTrainingResult(false);
             Debug.Log($"Episode reset at step: {stepCount}");
             suppressStepPunishmentThisAction = true;
+            RecordExpertTransitionIfNeeded(rewardAtStepStart, policyX, policyZ, expertX, expertZ, true);
             EndEpisodeWithTrainingStats("max_step");
             return;
         }
 
+        RecordExpertTransitionIfNeeded(rewardAtStepStart, policyX, policyZ, expertX, expertZ, false);
+        MaybeCompleteExpertBaselinePhase();
         previousPosition = GetAgentWorldPosition();
     }
 
     public override void Heuristic(in ActionBuffers actionsOut)
     {
         var continuous = actionsOut.ContinuousActions;
+        if (IsExpertBaselinePhase() && TryComputeExpertContinuousAction(out float expertX, out float expertZ))
+        {
+            continuous[0] = expertX;
+            continuous[1] = expertZ;
+            return;
+        }
+
         continuous[0] = 0f;
         continuous[1] = 0f;
         if (Input.GetKey(KeyCode.D))

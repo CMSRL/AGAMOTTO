@@ -68,6 +68,7 @@ namespace AGAMOTTO
         protected string[] m_terrainPathsLmabNames;
         protected List<Ride.Terrain.ITerrain> m_terrains = new List<Ride.Terrain.ITerrain>();
         protected Dictionary<string, RideID> entityList;
+        string _pendingHybridLeaderEntityUid;
         protected bool m_loadTrees { get => m_terrainLoader.m_loadTrees; set => m_terrainLoader.m_loadTrees = value; }
         protected bool m_cameraStartPosition { get => m_terrainLoader.m_cameraStartPosition; set => m_terrainLoader.m_cameraStartPosition = value; }
         protected int m_loadRadius { get => m_terrainLoader.m_renderRadius; set => m_terrainLoader.m_renderRadius = value; }
@@ -149,6 +150,8 @@ namespace AGAMOTTO
             ExportData.WriteStatus("Invalid");
 
             entityList = new Dictionary<string, RideID>();
+            AGAMOTTO_HybridAwacHub.ResetForNewScenario();
+            _pendingHybridLeaderEntityUid = null;
             worldStateSystem = Globals.api.worldStateSystem;
             worldStateSystem.AddListener<TerrainLoadedEvent>(WorldEvent.terrainLoaded, OnTerrainLoaded);
             LoadTerrain();
@@ -232,7 +235,7 @@ namespace AGAMOTTO
                             return;
                         }
 
-                        if (mode.Equals("Training"))
+                        if (string.Equals(mode, "Training", StringComparison.OrdinalIgnoreCase))
                         {
                             Debug.Log($"Received a CoT Message in RL Training Mode");
                             if (type != null && type.StartsWith("a"))
@@ -256,7 +259,7 @@ namespace AGAMOTTO
                                 }
                             }
                         }
-                        else if (mode.Equals("Evaluation"))
+                        else if (string.Equals(mode, "Evaluation", StringComparison.OrdinalIgnoreCase))
                         {
                             Debug.Log($"Received a CoT Message in Evaluation Mode - Creating entity {type}");
                             if (type != null && type.StartsWith("a"))
@@ -266,79 +269,42 @@ namespace AGAMOTTO
 
                             if (type != null && type.EndsWith("r"))
                             {
-                                //If CoT message is a route, create route in RIDE, and associate with the applicable entity
-                                XmlNode routeNode = root.SelectSingleNode("detail/route");
-
-                                int routeSize = 0;
-
-                                // inelegant; replace
-                                foreach (XmlNode point in routeNode)
+                                RideVector3[] path = ParseRouteWorldPath(root);
+                                if (path != null && path.Length >= 2)
                                 {
-                                    routeSize++;
+                                    Debug.Log($"Attempting to create path for {callsign}");
+                                    CreatePath(callsign, path);
                                 }
-                                RideVector3[] path = new RideVector3[routeSize];
-
-                                //Debug.Log(routeSize);
-                                int counter = 0;
-                                foreach (XmlNode point in routeNode)
-                                {
-                                    string lat = point.Attributes["lat"]?.Value;
-                                    string lon = point.Attributes["lon"]?.Value;
-                                    string hae = point.Attributes["hae"]?.Value;
-                                    RideVector3 scenPos = Globals.api.terrainSystem.ConvertToScenePosition(Convert.ToDouble(lat), Convert.ToDouble(lon));
-                                    path[counter] = scenPos;
-                                    //Debug.Log($"Point - Lat: {lat}, Lon: {lon}, HAE: {hae}");
-                                    counter++;
-                                }
-                                Debug.Log($"Attempting to create path for {callsign}");
-                                //associate with existing entity
-                                bool success = CreatePath(callsign, path);
-                                
                             }
                         }
-                        else if (mode.Equals("Hybrid"))
+                        else if (string.Equals(mode, "Hybrid", StringComparison.OrdinalIgnoreCase))
                         {
                             Debug.Log($"Received a CoT Message in Hybrid Mode - Creating entity {type}");
+                            AGAMOTTO_HybridAwacHub.EnableHybridDispatch();
                             if (type != null && type.StartsWith("a"))
                             {
                                 RideID unitCreated = CreateUnit(type, uid, double.Parse(lat), double.Parse(lon), true);
+                                if (IsFriendlyCotType(type) && AGAMOTTO_ATD_Agent.IsValidRideId(unitCreated))
+                                {
+                                    AGAMOTTO_HybridAwacHub.RegisterEntity(uid, callsign, unitCreated);
+                                    _pendingHybridLeaderEntityUid = uid;
+                                }
                             }
 
                             if (type != null && type.EndsWith("r"))
                             {
-                                //Debug.Log("Received a route");
-                                //Debug.Log(type);
-                                XmlNode routeNode = root.SelectSingleNode("detail/route");
-
-                                int routeSize = 0;
-
-                                // inelegant; replace
-                                foreach (XmlNode point in routeNode)
+                                RideVector3[] path = ParseRouteWorldPath(root);
+                                if (path != null && path.Length >= 2)
                                 {
-                                    routeSize++;
+                                    Debug.Log($"Attempting to create hybrid expert path for {callsign}");
+                                    bool pathOk = CreatePath(callsign, path, registerExpertRoute: true);
+                                    if (pathOk && !string.IsNullOrEmpty(_pendingHybridLeaderEntityUid))
+                                    {
+                                        TryStartHybridAwacTraining(_pendingHybridLeaderEntityUid);
+                                        _pendingHybridLeaderEntityUid = null;
+                                    }
                                 }
-                                RideVector3[] path = new RideVector3[routeSize];
-
-                                //Debug.Log(routeSize);
-                                int counter = 0;
-                                foreach (XmlNode point in routeNode)
-                                {
-                                    string lat = point.Attributes["lat"]?.Value;
-                                    string lon = point.Attributes["lon"]?.Value;
-                                    string hae = point.Attributes["hae"]?.Value;
-                                    RideVector3 scenPos = Globals.api.terrainSystem.ConvertToScenePosition(Convert.ToDouble(lat), Convert.ToDouble(lon));
-                                    path[counter] = scenPos;
-                                    //Debug.Log($"Point - Lat: {lat}, Lon: {lon}, HAE: {hae}");
-                                    counter++;
-                                }
-                                Debug.Log($"Attempting to create path for {callsign}");
-                                //associate with existing entity
-                                bool success = CreatePath(callsign, path);
-                                //wait until path completion and mission success/failure
-                                //await WaitUntilATDComplete(callsign);
                             }
-
-
                         }
 
 
@@ -425,24 +391,70 @@ namespace AGAMOTTO
             });
         }
 
-        bool CreatePath(string callsign, RideVector3[] path)
+        RideVector3[] ParseRouteWorldPath(XmlNode root)
         {
-            //set path for agent
-            //WARNING: Agent has to exist in the entityList; possible race condition
-            if (entityList.ContainsKey(callsign) && simulationState.State == SimStateType.Idle)
+            XmlNode routeNode = root?.SelectSingleNode("detail/route");
+            if (routeNode == null)
+                return null;
+
+            var points = new List<RideVector3>();
+            foreach (XmlNode point in routeNode)
             {
-                Globals.api.movementSystem.MoveGroupPath(entityList[callsign], path, FormationProcedureType.Wedge);
-                //Need methods to determine when movement complete
-
-
+                string plat = point.Attributes["lat"]?.Value;
+                string plon = point.Attributes["lon"]?.Value;
+                if (string.IsNullOrEmpty(plat) || string.IsNullOrEmpty(plon))
+                    continue;
+                RideVector3 scenPos = Globals.api.terrainSystem.ConvertToScenePosition(
+                    Convert.ToDouble(plat), Convert.ToDouble(plon));
+                points.Add(scenPos);
             }
-            else
+            return points.Count > 0 ? points.ToArray() : null;
+        }
+
+        bool CreatePath(string callsignOrUid, RideVector3[] path, bool registerExpertRoute = false)
+        {
+            string entityKey = callsignOrUid;
+            if (!entityList.ContainsKey(entityKey)
+                && !AGAMOTTO_HybridAwacHub.TryResolveEntityKey(callsignOrUid, out entityKey))
             {
-                Debug.Log("Entity Associated with Route does not exist in list; Entity either does not exist or has not yet been created; please try again");
+                Debug.Log(
+                    "Entity associated with route does not exist in list; entity either does not exist "
+                    + "or has not yet been created; please try again");
+                return false;
             }
 
+            if (!entityList.ContainsKey(entityKey))
+                return false;
 
-                return true;
+            if (simulationState.State != SimStateType.Idle && simulationState.State != SimStateType.TerrainLoaded)
+            {
+                Debug.Log("CreatePath refused — simulation not idle.");
+                return false;
+            }
+
+            if (registerExpertRoute)
+            {
+                var world = new Vector3[path.Length];
+                for (int i = 0; i < path.Length; i++)
+                    world[i] = new Vector3((float)path[i].x, (float)path[i].y, (float)path[i].z);
+                AGAMOTTO_HybridAwacHub.RegisterExpertRoute(callsignOrUid, world, entityKey);
+            }
+
+            Globals.api.movementSystem.MoveGroupPath(entityList[entityKey], path, FormationProcedureType.Wedge);
+            AGAMOTTO_HybridAwacHub.MarkExpertPathIssued(callsignOrUid);
+            return true;
+        }
+
+        bool TryStartHybridAwacTraining(string entityUid)
+        {
+            if (!entityList.TryGetValue(entityUid, out RideID tacticalGroup))
+            {
+                Debug.LogWarning($"AGAMOTTO: hybrid AWAC training deferred — unknown entity uid={entityUid}");
+                return false;
+            }
+
+            Debug.Log($"AGAMOTTO: starting hybrid AWAC training for entity uid={entityUid}");
+            return StartRLTraining(tacticalGroup);
         }
 
         public bool IsATDMissionComplete(Ride.Team team)

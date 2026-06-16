@@ -1,5 +1,5 @@
 """
-Load CoT entity/route XML from AGAMOTTO Server/Unity_Data for automated tests (no WinTAK GUI).
+Load CoT entity/route XML from AGAMOTTO Server/Unity_Data for manual replay (no WinTAK GUI).
 
 Supports WinTAK-exported files wrapped as <root>&lt;event ...&gt;</root> with HTML-escaped inner XML.
 """
@@ -9,22 +9,39 @@ from __future__ import annotations
 import html
 import uuid
 import xml.etree.ElementTree as ET
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from evaluation.cot_builder import build_entity_cot
-
-SERVER_DIR = Path(__file__).resolve().parents[1]
+SERVER_DIR = Path(__file__).resolve().parent
 DEFAULT_UNITY_DATA_DIR = SERVER_DIR / "Unity_Data"
-DEFAULT_UNITY_PROJECT_DIR = SERVER_DIR.parent / "AGAMOTTO Simulation"
 
 
-def default_unity_data_dir() -> Path:
-    return DEFAULT_UNITY_DATA_DIR
+def _iso_now() -> str:
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
 
 
-def default_streaming_entities_dir() -> Path:
-    return DEFAULT_UNITY_PROJECT_DIR / "Assets" / "StreamingAssets" / "entities"
+def build_entity_cot(
+    *,
+    uid: str,
+    cot_type: str,
+    lat: float,
+    lon: float,
+    hae: float = 0.0,
+    mode: str = "Training",
+    callsign: str | None = None,
+) -> str:
+    now = _iso_now()
+    cs = callsign or uid[:8]
+    return f"""<?xml version="1.0" encoding="UTF-8"?>
+<event version="2.0" uid="{uid}" type="{cot_type}" how="m-g"
+  time="{now}" start="{now}" stale="{now}" mode="{mode}">
+  <point lat="{lat}" lon="{lon}" hae="{hae}" ce="30.0" le="30.0" />
+  <detail>
+    <contact callsign="{cs}" />
+    <remarks>AGAMOTTO CoT replay</remarks>
+  </detail>
+</event>"""
 
 
 def normalize_cot_xml(raw: str) -> str:
@@ -79,16 +96,12 @@ def apply_dispatch_mode(
     training_friendly_limit: Optional[int] = None,
     friendly_training_count: List[int] | None = None,
 ) -> str:
-    """Set event mode=Training|Evaluation|Hybrid.
-
-    Hostile (a-h-*) markers are always Evaluation so Unity never attaches ML-Agents to Red.
-    Only friendly (a-f-*) markers may be Training (subject to training_friendly_limit).
-    """
+    """Set event mode=Training|Evaluation|Hybrid."""
     event = ET.fromstring(cot_xml)
     cot_type = event.attrib.get("type", "")
     team = _cot_type_team(cot_type)
     if cot_type.endswith("-r"):
-        effective_mode = "Evaluation"
+        effective_mode = mode if str(mode).lower() == "hybrid" else "Evaluation"
     elif team == "hostile":
         effective_mode = "Evaluation"
     elif team == "friendly":
@@ -123,26 +136,6 @@ def load_cot_file(path: Path, mode: str, **mode_kwargs) -> Dict[str, Any]:
     }
 
 
-def _pick_one_per_team(entries: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    """Keep at most one hostile and one friendly entity CoT (first sorted by path)."""
-    hostile: Optional[Dict[str, Any]] = None
-    friendly: Optional[Dict[str, Any]] = None
-    for ent in entries:
-        if ent.get("kind") != "entity":
-            continue
-        team = ent.get("team")
-        if team == "hostile" and hostile is None:
-            hostile = ent
-        elif team == "friendly" and friendly is None:
-            friendly = ent
-    ordered: List[Dict[str, Any]] = []
-    if hostile is not None:
-        ordered.append(hostile)
-    if friendly is not None:
-        ordered.append(friendly)
-    return ordered
-
-
 def load_unity_data_scenario(
     data_dir: Path,
     *,
@@ -153,13 +146,8 @@ def load_unity_data_scenario(
     hostile_hae: float = 0.0,
     training_friendly_limit: Optional[int] = 1,
     include_routes: bool = True,
-    one_entity_per_team: bool = False,
 ) -> List[Dict[str, Any]]:
-    """
-    Build ordered spawn list: hostiles, friendlies, optional routes.
-
-    When <paramref name="data_dir"/> is the entities folder itself, only *.xml in that folder are loaded.
-    """
+    """Build ordered spawn list: hostiles, friendlies, optional routes."""
     data_dir = data_dir.resolve()
     if (data_dir / "entities").is_dir():
         entities_dir = data_dir / "entities"
@@ -182,9 +170,6 @@ def load_unity_data_scenario(
         item = load_cot_file(path, dispatch_mode, **mode_kwargs)
         if item.get("kind") == "entity":
             entries.append(item)
-
-    if one_entity_per_team:
-        entries = _pick_one_per_team(entries)
 
     has_hostile = any(e.get("team") == "hostile" for e in entries)
     if inject_hostile_if_missing and not has_hostile:
@@ -217,29 +202,3 @@ def load_unity_data_scenario(
             routes.append(load_cot_file(path, dispatch_mode))
 
     return hostiles + friendlies + routes
-
-
-def scenario_from_manifest_config(
-    cfg: Dict[str, Any],
-    server_base: Path,
-    *,
-    streaming_root: Optional[Path] = None,
-) -> List[Dict[str, Any]]:
-    if cfg.get("use_streaming_assets_entities"):
-        data_dir = default_streaming_entities_dir()
-    else:
-        rel = cfg.get("cot_data_dir", "Unity_Data")
-        data_dir = Path(rel)
-        if not data_dir.is_absolute():
-            data_dir = (server_base / rel).resolve()
-    return load_unity_data_scenario(
-        data_dir,
-        dispatch_mode=str(cfg.get("dispatch_mode", "Training")),
-        inject_hostile_if_missing=bool(cfg.get("inject_hostile_if_missing", True)),
-        hostile_lat=float(cfg.get("hostile_lat", 35.335081)),
-        hostile_lon=float(cfg.get("hostile_lon", -116.5160077)),
-        hostile_hae=float(cfg.get("hostile_hae", 0.0)),
-        training_friendly_limit=cfg.get("training_friendly_limit"),
-        include_routes=bool(cfg.get("include_routes", True)),
-        one_entity_per_team=bool(cfg.get("one_entity_per_team", False)),
-    )

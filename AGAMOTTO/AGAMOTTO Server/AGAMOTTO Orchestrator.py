@@ -2,7 +2,6 @@
 Interactive AGAMOTTO orchestrator: launch Unity BaseScene, wait for terrain, then serve CoT on TCP.
 
 Use --replay-unity-data to push CoT from Unity_Data (no WinTAK GUI).
-For batch training + ablations use evaluation_suite.py (same orchestrator_core module).
 """
 
 from __future__ import annotations
@@ -18,7 +17,7 @@ SERVER_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(SERVER_DIR))
 
 import orchestrator_core as oc  # noqa: E402
-from evaluation.unity_data_loader import load_unity_data_scenario  # noqa: E402
+from unity_data_loader import load_unity_data_scenario  # noqa: E402
 
 
 def _env_path(key: str, default: Path) -> str:
@@ -35,7 +34,7 @@ async def main(replay_unity_data: bool = False, unity_data_dir: str = "Unity_Dat
     print(f"[orchestrator] Project version: {project_version}")
     print(f"[orchestrator] Unity: {unity_exe}")
     print(f"[orchestrator] Project: {project_path}")
-    oc.launch_unity_play_mode(unity_exe, str(project_path), scene_path, batchmode=False)
+    #oc.launch_unity_play_mode(unity_exe, str(project_path), scene_path, batchmode=False)
 
     if not oc.wait_for_terrain_valid(status_path):
         print("[orchestrator] ERROR: terrain never reached Valid", file=sys.stderr)
