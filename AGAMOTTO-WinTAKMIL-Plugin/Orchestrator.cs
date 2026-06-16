@@ -94,6 +94,9 @@ namespace AGAMOTTO.WinTAKMIL
             var cotMessages = new List<XDocument>();
             var sentKeys = new HashSet<(string uid, string type)>(); //avoid duplicates
             var sentRouteUids = new HashSet<string>();
+            var friendlyAnchors = mode == DispatchMode.Hybrid
+                ? CollectFriendlyAnchors(EnumerateAllNodes(rootItems))
+                : null;
 
             foreach (var node in EnumerateAllNodes(rootItems))
             {
@@ -132,6 +135,12 @@ namespace AGAMOTTO.WinTAKMIL
                     if (sentRouteUids.Contains(uid)) continue;
 
                     var rName = mapItem.Name ?? "Route";
+                    if (mode == DispatchMode.Hybrid && friendlyAnchors != null && friendlyAnchors.Count > 0)
+                    {
+                        var linked = MatchNearestFriendlyCallsign(verts[0], friendlyAnchors);
+                        if (!string.IsNullOrWhiteSpace(linked))
+                            rName = linked;
+                    }
                     var routeEvt = BuildRouteEvent(uid, rName, DateTime.UtcNow, verts);
                     //cotMessages.Add(new XDocument(new XDeclaration("1.0", "UTF-8", "yes"), routeEvt));
                     var x = new XDocument(new XDeclaration("1.0", "UTF-8", "yes"), routeEvt);
@@ -464,12 +473,70 @@ namespace AGAMOTTO.WinTAKMIL
             return filtered.Length > maxLen ? filtered.Substring(0, maxLen) : filtered;
         }
 
+        sealed class FriendlyAnchor
+        {
+            public string Callsign;
+            public double Lat;
+            public double Lon;
+        }
+
+        static List<FriendlyAnchor> CollectFriendlyAnchors(IEnumerable<MapObjectItem> nodes)
+        {
+            var anchors = new List<FriendlyAnchor>();
+            foreach (var node in nodes)
+            {
+                if (node?.MapItem == null) continue;
+                var mapItem = node.MapItem;
+                var type = mapItem.GetCotType() ?? GetCotTypeFallback(mapItem);
+                if (string.IsNullOrWhiteSpace(type) || !type.StartsWith("a-f", StringComparison.OrdinalIgnoreCase))
+                    continue;
+                if (type.EndsWith("-r", StringComparison.OrdinalIgnoreCase))
+                    continue;
+
+                double lat = 0, lon = 0;
+                try
+                {
+                    lat = node.Position?.Latitude ?? 0.0;
+                    lon = node.Position?.Longitude ?? 0.0;
+                }
+                catch { continue; }
+
+                var callsign = mapItem.Name;
+                if (string.IsNullOrWhiteSpace(callsign))
+                    callsign = mapItem.Uid ?? "friendly";
+                anchors.Add(new FriendlyAnchor { Callsign = callsign, Lat = lat, Lon = lon });
+            }
+            return anchors;
+        }
+
+        static string MatchNearestFriendlyCallsign(
+            (double lat, double lon, double? alt) routeStart,
+            List<FriendlyAnchor> anchors)
+        {
+            if (anchors == null || anchors.Count == 0)
+                return null;
+            FriendlyAnchor best = null;
+            double bestScore = double.MaxValue;
+            foreach (var anchor in anchors)
+            {
+                double dLat = anchor.Lat - routeStart.lat;
+                double dLon = anchor.Lon - routeStart.lon;
+                double score = dLat * dLat + dLon * dLon;
+                if (score < bestScore)
+                {
+                    bestScore = score;
+                    best = anchor;
+                }
+            }
+            return best?.Callsign;
+        }
+
         public static void Mode(XDocument doc, DispatchMode mode, string mission)
         {
             if (doc?.Root == null) return;
             
             var ev = doc.Root;
-            var val = mode;// == DispatchMode.Training;// ? "training" : "visualization";
+            var val = mode.ToString();
             var miss = mission;
 
             ev.SetAttributeValue("mode", val);
