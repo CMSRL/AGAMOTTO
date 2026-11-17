@@ -1,6 +1,6 @@
 # AGAMOTTO Server
 
-Python orchestration for Unity / RIDE training and CoT replay (WinTAK optional).
+Optional Python helpers. **CoT ingest lives in Unity** — press Play, then send TAK data to port **65432**. Do not run a CoT TCP middleman.
 
 ---
 
@@ -26,30 +26,25 @@ For standard SAC training, `mlagents-learn` must be on `PATH`.
 
 ---
 
-## Interactive orchestrator
+## Direct TAK → Unity
 
-Launches Unity, waits for terrain **Valid**, then listens for CoT on TCP (WinTAK plugin or scripted replay).
+1. Unity **Play** on `BaseScene`.
+2. Wait for `AGAMOTTO_CotTcpListener: listening on 0.0.0.0:65432`.
+3. WinTAK plugin: IP of the Unity machine, port **65432**, **Send Map Data**.
 
-```powershell
-cd "AGAMOTTO\AGAMOTTO Server"
-python "AGAMOTTO Orchestrator.py"
-```
-
-**Replay CoT from disk** (no WinTAK GUI):
+`AGAMOTTO Orchestrator.py` no longer binds that port (it would steal the socket from Unity). Replay-only:
 
 ```powershell
 python "AGAMOTTO Orchestrator.py" --replay-unity-data --unity-data-dir Unity_Data
 ```
 
-Place entity XML under `Unity_Data/entities/` and optional routes under `Unity_Data/routes/`.
+Place entity XML under `Unity_Data/entities/` and optional routes under `Unity_Data/routes/`. Unity must already be playing.
 
 **Environment overrides**
 
 | Variable | Default | Purpose |
 |----------|---------|---------|
-| `AGAMOTTO_UNITY_PROJECT` | (auto) | Path to simulation project |
-| `AGAMOTTO_COT_PORT` | `65432` | TCP port — match WinTAK plugin |
-| `AGAMOTTO_SCENE_PATH` | `Assets\Scenes\BaseScene.unity` | Scene to open |
+| `AGAMOTTO_COT_PORT` | `65432` | Must match Unity `cotListenPort` and the WinTAK plugin |
 
 ---
 
@@ -57,17 +52,13 @@ Place entity XML under `Unity_Data/entities/` and optional routes under `Unity_D
 
 Optional per-run overrides: `AGAMOTTO Simulation/Assets/StreamingAssets/evaluation/active_run.json`
 
-Example for hybrid AWAC:
+Example for SAC:
 
 ```json
 {
   "version": 1,
-  "runId": "hybrid_awac",
-  "dispatchMode": "Hybrid",
-  "awacEnabled": true,
-  "awacLambda": 1.0,
-  "expertPhaseMaxSteps": 2000,
-  "expertBlendDuringOnline": 0.0,
+  "runId": "sac_run",
+  "dispatchMode": "Training",
   "trainingFriendlyLimit": 1,
   "sendTrainingFeedbackToTak": false,
   "useSquadNavMeshPaths": false
@@ -78,85 +69,34 @@ Unity reads this at RL agent init via `AGAMOTTO_EvaluationRunConfig.cs`.
 
 ---
 
-## Hybrid AWAC training
+## SAC training (automatic inference)
 
-ML-Agents has **no native AWAC**. AGAMOTTO implements:
-
-1. **Expert baseline (Unity)** — leader follows the WinTAK/orchestrator route; mission rewards and transitions are recorded.
-2. **Online AWAC (Python)** — `agamotto_awac_train.py` connects to the Academy and runs SAC + advantage-weighted updates using the expert buffer.
-
-### Expert buffer (created in Unity)
-
-During **Hybrid** dispatch, Unity writes:
-
-```text
-Assets/StreamingAssets/awac/
-  expert_buffer.jsonl   # one JSON transition per line
-  expert_manifest.json
-```
-
-Each line contains `observation` (10-dim ATD), `expert_action`, `policy_action`, step `reward`, and metadata. The buffer is flushed when the expert baseline phase ends (route complete or `expertPhaseMaxSteps`).
-
-**Requires:** friendly entity CoT (`a-f-*`, `mode=Hybrid`) **and** leader route CoT (`b-m-p-s-r`, `mode=Hybrid`) with matching callsign.
-
-### Full AWAC workflow
-
-**1. WinTAK (or orchestrator):** Hybrid mode → place friendly squad + draw leader route → Send.
-
-**2. Unity:** Open `BaseScene`, wait for terrain **Valid**, ensure squads spawned.
-
-**3. Terminal 1 — AWAC trainer** (start **before** Play):
+WinTAK **SAC** mode (`mode=Training` on CoT) spawns the friendly squad and attaches the RL policy. **Play Unity first** so the CoT listener and Academy are up, then send map data.
 
 ```powershell
-cd "C:\Users\matthew.corbett\AGAMOTTO\AGAMOTTO\AGAMOTTO Server"
+cd "AGAMOTTO\AGAMOTTO Server"
+pip install -r requirements-awac.txt
 
-python agamotto_awac_train.py configs/hybrid_awac.yaml `
-  --run-id=hybrid_awac `
-  --results-dir=results `
-  --behavior-name=AGAMOTTO_RL `
-  --base-port=5004 `
-  --timeout-wait=5000 `
-  --time-scale=50 `
-  --expert-wait-s=900 `
-  --expert-min-transitions=32
-```
-
-The trainer waits for `expert_buffer.jsonl` (≥32 transitions), then connects to the Academy.
-
-**4. Unity:** Press **Play** when you see `Connecting to Unity Academy...` (online AWAC phase — after expert baseline has written the buffer).
-
-**5. Outputs:** checkpoints under `results/AGAMOTTO_RL/hybrid_awac/`; training logs every ~1200 steps.
-
-### Order summary
-
-| Step | Action |
-|------|--------|
-| 1 | Hybrid CoT: friendly + route |
-| 2 | Unity terrain Valid; expert baseline runs (first session) |
-| 3 | `agamotto_awac_train.py` listening |
-| 4 | Unity **Play** for online AWAC |
-| 5 | Check `results/` for `.pt` checkpoints |
-
----
-
-## SAC training (manual)
-
-Standard ML-Agents SAC (no AWAC expert buffer):
-
-```powershell
-# Terminal 1
-mlagents-learn ..\AGAMOTTO_RL_sac_tuned.yaml `
-  --run-id=atd_train `
+python agamotto_sac_train.py `
+  --run-id=sac_run `
   --results-dir=results `
   --timeout-wait=5000 `
   --time-scale=50 `
   --force
-
-# Terminal 2 — orchestrator or WinTAK Training-mode CoT, then Unity Play
-python "AGAMOTTO Orchestrator.py" --replay-unity-data
 ```
 
-Behavior name: **`AGAMOTTO_RL`**. Only friendly (`a-f-*`) squads receive the policy.
+Default config: repo-root `AGAMOTTO_RL_sac_tuned.yaml`. Override with a positional YAML path.
+
+| Step | Action |
+|------|--------|
+| 1 | Unity **Play** (CoT listener 65432 + Academy) |
+| 2 | `python agamotto_sac_train.py ...` |
+| 3 | WinTAK **SAC**: friendly + route + hostile → Send Map Data |
+| 4 | Training completes → ONNX copied → inference episode(s) → WinTAK `training_complete` + `inference_complete` |
+
+Flags: `--inference-episodes` (default 1), `--skip-inference`, `--leader-callsign`, `--resume`.
+
+Legacy: `agamotto_post_train.py` only re-runs setup/inference from an existing `results/` folder.
 
 ---
 
@@ -164,13 +104,32 @@ Behavior name: **`AGAMOTTO_RL`**. Only friendly (`a-f-*`) squads receive the pol
 
 | Script | Purpose |
 |--------|---------|
-| `orchestrator_core.py` | Unity launch, terrain `status.json`, CoT TCP + StreamingAssets |
-| `AGAMOTTO Orchestrator.py` | Interactive entry point |
+| `orchestrator_core.py` | Shared CoT framing helpers (replay only) |
+| `AGAMOTTO Orchestrator.py` | Prints the Unity/TAK workflow; optional `--replay-unity-data` |
 | `unity_data_loader.py` | Load `Unity_Data` CoT for `--replay-unity-data` |
-| `agamotto_awac_train.py` | Custom AWAC trainer (PyTorch + mlagents_envs) |
-| `configs/hybrid_awac.yaml` | AWAC hyperparameters |
-| `requirements-awac.txt` | Python deps for AWAC trainer |
+| `agamotto_sac_train.py` | SAC via `mlagents-learn` + post-training inference |
+| `agamotto_inference_common.py` | Shared ONNX copy, `active_run.json`, Unity inference runner |
+| `agamotto_post_train.py` | Re-run SAC inference setup from existing results (optional) |
+| `tak_feedback.py` | JSON messages to WinTAK plugin (port 65433) |
+| `causal/fit_graph.py` | Fit terrain SCM from CausalRecorder JSONL |
+| `requirements-awac.txt` | Python deps for SAC trainer |
 | `EYE_OF_AGAMOTTO_RL/` | Legacy RL experiments |
+
+---
+
+## Post-training inference (SAC)
+
+After training, one **inference episode** runs automatically. Unity samples the leader path and sends results to WinTAK (Assessment text + **blue route** on the map). No separate Inference mode or manual post-train script is required.
+
+`agamotto_sac_train.py` runs `mlagents-learn`, copies `StreamingAssets/policies/AGAMOTTO_RL.onnx`, writes `evaluation/active_run.json` (`phase: inference`), notifies WinTAK (`training_complete`), then runs `--inference-episodes` (default 1) via ONNX + `mlagents_envs`. Unity reports `inference_complete` with lat/lon route points.
+
+### WinTAK results (port 65433)
+
+| `kind` | Meaning |
+|--------|---------|
+| `training_complete` | Trainer finished; checkpoint path in payload |
+| `inference_complete` | Inference episode outcome + `routePoints` (blue `b-m-p-s-r` on map) |
+| `rl_training_episode` | Per-episode training feedback (unchanged) |
 
 ---
 
@@ -178,14 +137,26 @@ Behavior name: **`AGAMOTTO_RL`**. Only friendly (`a-f-*`) squads receive the pol
 
 | Symptom | Check |
 |---------|--------|
-| Academy never connects | Start `agamotto_awac_train.py` **before** Unity Play; stay within `--timeout-wait`. |
-| Expert buffer empty | Hybrid CoT must include **route**; watch Unity log for `expert baseline complete`. |
+| WinTAK Send fails | Unity must be in Play with `AGAMOTTO_CotTcpListener` on 65432. Do not run the old Python CoT server. |
 | `np.bool` / NumPy error | `pip install "numpy<2.0"` or use `requirements-awac.txt`. |
 | Wrong obs size | Rebuild Unity after ATD obs changes; trainer expects 10-dim ATD vector. |
 | Multiple deciding agents | Set `trainingFriendlyLimit: 1` in `active_run.json`. |
-| CoT spawns before terrain ready | Wait for `status.json` **Valid** before sending entities. |
-| Port bind error | Set `AGAMOTTO_COT_PORT` and match WinTAK plugin port. |
+| CoT spawns before terrain ready | Wait for terrain **Valid** before sending entities. |
+| Port bind error | Another process (old orchestrator) is holding 65432. |
 | Units dead after episode reset | Rebuild with `RestoreAgentAtSpawn` (`SetAgentHealthFull` + Idle). |
+
+---
+
+## Terrain causal OE (v1)
+
+Evaluation + F8 `CausalRecorder` writes `AGAMOTTO Simulation/CausalLogs/causal_*.jsonl`. Fit:
+
+```powershell
+python causal\fit_graph.py --self-test
+python causal\fit_graph.py "..\AGAMOTTO Simulation\CausalLogs\causal_YYYYMMDD_HHMMSS.jsonl"
+```
+
+See [`causal/README.md`](causal/README.md).
 
 ---
 

@@ -96,7 +96,7 @@ def apply_dispatch_mode(
     training_friendly_limit: Optional[int] = None,
     friendly_training_count: List[int] | None = None,
 ) -> str:
-    """Set event mode=Training|Evaluation|Hybrid."""
+    """Set event mode=Training|Evaluation."""
     event = ET.fromstring(cot_xml)
     cot_type = event.attrib.get("type", "")
     team = _cot_type_team(cot_type)

@@ -183,15 +183,10 @@
                      Margin="0,0,16,0"
                      Style="{StaticResource DarkRadio}"/>
 
-                    <RadioButton Content="Training"
+                    <RadioButton Content="SAC"
                      GroupName="Mode"
                      Command="{Binding SetTrainingModeCommand}"
                                  Margin="0,0,16,0"
-                     Style="{StaticResource DarkRadio}"/>
-
-                    <RadioButton Content="Hybrid"
-                     GroupName="Mode"
-                     Command="{Binding SetHybridModeCommand}"
                      Style="{StaticResource DarkRadio}"/>
                 </StackPanel>
 

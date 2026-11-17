@@ -5,9 +5,11 @@ using Ride.AI;
 using Ride.AI.RL;
 using Ride.Entities;
 using Ride.Movement;
+using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
+using System.Reflection;
 using Unity.MLAgents;
 using Unity.MLAgents.Actuators;
 using Unity.MLAgents.Policies;
@@ -109,201 +111,133 @@ public class AGAMOTTO_ATD_Agent : RLAgent
     List<(RideID id, RideVector3 world)> _lockedEnemySpawnWorld;
     /// <summary>Wingman horizontal offsets from leader (m), keyed by entity id; capped to <see cref="squadMaxMemberSpacingM"/>.</summary>
     List<(int entityId, double offsetX, double offsetY, double offsetZ)> _friendlySquadOffsets;
+    float _lastEpisodeRespawnTime = -1f;
     bool _loggedSquadMoveThisEpisode;
-
-    [Header("Hybrid AWAC")]
-    [Tooltip("AWAC advantage temperature λ from active_run.json.")]
-    public float awacLambda = 1.0f;
-    [Tooltip("Blend toward expert route action during online AWAC (0 = policy only).")]
-    public float expertBlendDuringOnline = 0f;
-    [Tooltip("Max RL steps in expert-baseline phase before online AWAC.")]
-    public int expertPhaseMaxSteps = 2000;
-    [Tooltip("Horizontal distance (m) to advance to next expert waypoint.")]
-    public float expertWaypointReachRadiusM = 15f;
-
-    bool _awacHybridEnabled;
-    bool _expertBaselineComplete;
-    bool _recordExpertTransitions;
-    int _expertWaypointIndex;
-    Vector3[] _expertWaypointsWorld;
-    readonly float[] _cachedObservation = new float[AGAMOTTO_ExpertTrajectoryRecorder.ObservationSize];
+    bool _loggedFirstActionThisEpisode;
     BehaviorParameters _behaviorParameters;
+
+    [Header("Post-training inference")]
+    bool _inferenceRun;
+    string _inferenceTrainer = "sac";
+    string _inferenceRunId = "inference";
+    string _leaderCallsign = "leader";
+    int _inferenceRouteSampleSteps = 8;
+    readonly List<AGAMOTTO_TakTrainingFeedback.RoutePoint> _inferenceRoute = new List<AGAMOTTO_TakTrainingFeedback.RoutePoint>();
+    string _lastInferenceOutcome = "";
+    bool _lastInferenceSuccess;
 
     void Awake()
     {
         _behaviorParameters = GetComponent<BehaviorParameters>();
     }
 
-    void SyncAwacBehaviorMode()
+    static bool IsExternalTrainerConnected()
     {
-        if (_behaviorParameters == null)
+        if (Academy.Instance == null)
+            return false;
+
+        try
+        {
+            var academy = Academy.Instance;
+            const BindingFlags flags = BindingFlags.Public | BindingFlags.Instance;
+            foreach (string propName in new[] { "IsCommunicatorOn", "isCommunicatorOn" })
+            {
+                var prop = academy.GetType().GetProperty(propName, flags);
+                if (prop != null && prop.PropertyType == typeof(bool) && (bool)prop.GetValue(academy))
+                    return true;
+            }
+
+            foreach (string propName in new[] { "Communicator", "communicator" })
+            {
+                var prop = academy.GetType().GetProperty(propName, flags);
+                if (prop != null && prop.GetValue(academy) != null)
+                    return true;
+            }
+        }
+        catch
+        {
+            /* optional ML-Agents API */
+        }
+
+        return false;
+    }
+
+    public void ConfigureInferenceRun(string trainer, string runId, string leaderCallsign, int routeSampleSteps)
+    {
+        _inferenceRun = true;
+        _inferenceTrainer = string.IsNullOrEmpty(trainer) ? "sac" : trainer;
+        _inferenceRunId = string.IsNullOrEmpty(runId) ? "inference" : runId;
+        _leaderCallsign = string.IsNullOrEmpty(leaderCallsign) ? "leader" : leaderCallsign;
+        _inferenceRouteSampleSteps = Mathf.Max(routeSampleSteps, 1);
+        _inferenceRoute.Clear();
+        if (_behaviorParameters != null)
+            _behaviorParameters.BehaviorType = BehaviorType.InferenceOnly;
+        Debug.Log(
+            $"AGAMOTTO_ATD_Agent: inference run enabled trainer={_inferenceTrainer} runId={_inferenceRunId}");
+    }
+
+    void RecordInferenceRouteSample()
+    {
+        if (!_inferenceRun || _inferenceRouteSampleSteps <= 0)
             return;
-        if (_awacHybridEnabled && IsExpertBaselinePhase())
-            _behaviorParameters.BehaviorType = BehaviorType.HeuristicOnly;
-        else
-            _behaviorParameters.BehaviorType = BehaviorType.Default;
-    }
-
-    public void ApplyAwacRunConfig(
-        bool awacEnabled,
-        float lambda,
-        int expertMaxSteps,
-        float onlineExpertBlend,
-        string expertTrajectoryPath,
-        string runId,
-        bool hybridDispatchMode)
-    {
-        _awacHybridEnabled = awacEnabled || hybridDispatchMode || AGAMOTTO_HybridAwacHub.IsHybridDispatch;
-        awacLambda = lambda > 0f ? lambda : 1f;
-        expertPhaseMaxSteps = expertMaxSteps > 0 ? expertMaxSteps : 2000;
-        expertBlendDuringOnline = Mathf.Clamp01(onlineExpertBlend);
-        _expertBaselineComplete = !_awacHybridEnabled;
-        _recordExpertTransitions = _awacHybridEnabled;
-
-        if (_awacHybridEnabled)
-        {
-            AGAMOTTO_HybridAwacHub.EnableHybridDispatch();
-            if (AGAMOTTO_HybridAwacHub.TryGetActiveExpertWaypoints(out var waypoints))
-                _expertWaypointsWorld = waypoints;
-            string leaderCallsign = AGAMOTTO_HybridAwacHub.ActiveLeaderCallsign ?? "leader";
-            AGAMOTTO_ExpertTrajectoryRecorder.Configure(
-                string.IsNullOrEmpty(runId) ? "hybrid_awac" : runId,
-                leaderCallsign,
-                true);
-            SyncAwacBehaviorMode();
-            Debug.Log(
-                $"AGAMOTTO_ATD_Agent: hybrid AWAC enabled λ={awacLambda} expertMaxSteps={expertPhaseMaxSteps}");
-        }
-        else if (!string.IsNullOrEmpty(expertTrajectoryPath))
-        {
-            Debug.Log($"AGAMOTTO_ATD_Agent: expert trajectory path configured ({expertTrajectoryPath})");
-        }
-    }
-
-    bool IsExpertBaselinePhase() =>
-        _awacHybridEnabled
-        && !_expertBaselineComplete
-        && AGAMOTTO_HybridAwacHub.CurrentPhase == AGAMOTTO_HybridAwacHub.AwacPhase.ExpertBaseline;
-
-    void RefreshExpertWaypointsFromHub()
-    {
-        if (_expertWaypointsWorld == null || _expertWaypointsWorld.Length < 2)
-        {
-            if (AGAMOTTO_HybridAwacHub.TryGetActiveExpertWaypoints(out var waypoints))
-                _expertWaypointsWorld = waypoints;
-        }
-    }
-
-    bool TryComputeExpertContinuousAction(out float xmov, out float zmov)
-    {
-        xmov = 0f;
-        zmov = 0f;
-        RefreshExpertWaypointsFromHub();
-        if (_expertWaypointsWorld == null || _expertWaypointsWorld.Length == 0)
-            return false;
-
-        if (_expertWaypointIndex >= _expertWaypointsWorld.Length)
-            return false;
+        if (stepCount % _inferenceRouteSampleSteps != 0 && stepCount > 1)
+            return;
 
         Vector3 pos = GetAgentWorldPosition();
-        Vector3 target = _expertWaypointsWorld[_expertWaypointIndex];
-        Vector3 to = target - pos;
-        to.y = 0f;
-        float reach = Mathf.Max(expertWaypointReachRadiusM, 1f);
-        if (to.sqrMagnitude <= reach * reach)
+        if (!AGAMOTTO_GeoAnchor.TryVector3ToLatLon(pos, out double lat, out double lon))
+            return;
+
+        if (_inferenceRoute.Count > 0)
         {
-            _expertWaypointIndex++;
-            if (_expertWaypointIndex >= _expertWaypointsWorld.Length)
-                return false;
-            target = _expertWaypointsWorld[_expertWaypointIndex];
-            to = target - pos;
-            to.y = 0f;
+            var last = _inferenceRoute[_inferenceRoute.Count - 1];
+            double dLat = lat - last.lat;
+            double dLon = lon - last.lon;
+            if (dLat * dLat + dLon * dLon < 1e-10)
+                return;
         }
 
-        if (to.sqrMagnitude < MinMoveDirectionSqr)
-            return false;
-
-        Vector3 dir = to.normalized;
-        xmov = Mathf.Clamp(dir.x, -1f, 1f);
-        zmov = Mathf.Clamp(dir.z, -1f, 1f);
-        return true;
+        _inferenceRoute.Add(new AGAMOTTO_TakTrainingFeedback.RoutePoint
+        {
+            lat = lat,
+            lon = lon,
+            alt = pos.y
+        });
     }
 
-    bool ExpertRouteComplete()
+    void NotifyTakInferenceOutcome(bool missionSuccess, string outcome)
     {
-        RefreshExpertWaypointsFromHub();
-        return _expertWaypointsWorld != null
-            && _expertWaypointsWorld.Length > 0
-            && _expertWaypointIndex >= _expertWaypointsWorld.Length;
-    }
+        _lastInferenceSuccess = missionSuccess;
+        _lastInferenceOutcome = outcome ?? "";
+        Vector3 pos = GetAgentWorldPosition();
+        if (AGAMOTTO_GeoAnchor.TryVector3ToLatLon(pos, out double lat, out double lon))
+        {
+            if (_inferenceRoute.Count == 0
+                || Math.Abs(_inferenceRoute[_inferenceRoute.Count - 1].lat - lat) > 1e-8
+                || Math.Abs(_inferenceRoute[_inferenceRoute.Count - 1].lon - lon) > 1e-8)
+            {
+                _inferenceRoute.Add(new AGAMOTTO_TakTrainingFeedback.RoutePoint
+                {
+                    lat = lat,
+                    lon = lon,
+                    alt = pos.y
+                });
+            }
+        }
 
-    void MaybeCompleteExpertBaselinePhase()
-    {
-        if (!IsExpertBaselinePhase())
-            return;
-        if (!ExpertRouteComplete() && stepCount < expertPhaseMaxSteps)
-            return;
-
-        _expertBaselineComplete = true;
-        AGAMOTTO_HybridAwacHub.BeginOnlineAwacPhase();
-        SyncAwacBehaviorMode();
-    }
-
-    void SnapshotObservation(VectorSensor sensor = null)
-    {
-        // Mirror CollectObservations layout for offline AWAC buffer export.
-        IAgentSystem agentSystem = Globals.api.agentSystem;
-        Vector3 agentPos = GetAgentWorldPosition();
-        float R = Mathf.Max(observationMapRadiusM, 1f);
-        float H = Mathf.Max(observationHeightScaleM, 1f);
-
-        RideVector3 enemyRv;
-        if (HasAssignedEnemy(m_enemy))
-            enemyRv = api.GetSystem<ITransformSystem>().GetPosition(m_enemy);
-        else
-            enemyRv = new RideVector3(agentPos.x, agentPos.y, agentPos.z);
-
-        Vector3 enemyWorld = new Vector3((float)enemyRv.x, (float)enemyRv.y, (float)enemyRv.z);
-        float relX = enemyWorld.x - agentPos.x;
-        float relZ = enemyWorld.z - agentPos.z;
-        float relY = enemyWorld.y - agentPos.y;
-
-        _cachedObservation[0] = Mathf.Clamp(relX / R, -1f, 1f);
-        _cachedObservation[1] = Mathf.Clamp(relZ / R, -1f, 1f);
-        _cachedObservation[2] = Mathf.Clamp(relY / H, -1f, 1f);
-        float dist = Vector3.Distance(agentPos, enemyWorld);
-        _cachedObservation[3] = Mathf.Clamp01(dist / R);
-        float theta = Mathf.Atan2(relZ, relX);
-        _cachedObservation[4] = Mathf.Sin(theta);
-        _cachedObservation[5] = Mathf.Cos(theta);
-        _cachedObservation[6] = HasAssignedEnemy(m_enemy) && !agentSystem.IsAgentDead(m_enemy) ? 1f : 0f;
-        _cachedObservation[7] = GetEnemySquadAliveRatio(agentSystem);
-        _cachedObservation[8] = GetFriendlyWingmanAliveRatio(agentSystem);
-        _cachedObservation[9] = MaxStep > 0 ? Mathf.Clamp01((float)stepCount / MaxStep) : 0f;
-    }
-
-    void RecordExpertTransitionIfNeeded(
-        float rewardAtStepStart,
-        float policyX,
-        float policyZ,
-        float expertX,
-        float expertZ,
-        bool done)
-    {
-        if (!_recordExpertTransitions || !IsExpertBaselinePhase())
-            return;
-
-        float stepReward = GetCumulativeReward() - rewardAtStepStart;
-        var policy = new[] { policyX, policyZ };
-        var expert = new[] { expertX, expertZ };
-        AGAMOTTO_ExpertTrajectoryRecorder.RecordTransition(
+        string routeName = $"{_inferenceTrainer.ToUpperInvariant()} policy route";
+        AGAMOTTO_TakTrainingFeedback.TrySendInferenceComplete(
+            sendTrainingFeedbackToTak,
+            takFeedbackHost,
+            takFeedbackPort,
+            _inferenceTrainer,
+            _inferenceRunId,
+            missionSuccess,
             stepCount,
-            _cachedObservation,
-            policy,
-            expert,
-            stepReward,
-            done,
-            GetCumulativeReward());
+            GetCumulativeReward(),
+            outcome,
+            _leaderCallsign,
+            routeName,
+            _inferenceRoute);
     }
 
     /// <summary>
@@ -331,23 +265,76 @@ public class AGAMOTTO_ATD_Agent : RLAgent
     /// <summary>Resolve current <see cref="RideID.version"/> from sim rosters (spawn snapshots often lag after deaths).</summary>
     RideID ResolveLiveRideId(RideID snapshotId)
     {
-        if (!IsValidRideId(snapshotId))
-            return snapshotId;
+        List<RideID> candidates = ResolveRideIdCandidates(snapshotId);
+        return candidates.Count > 0 ? candidates[0] : snapshotId;
+    }
 
+    /// <summary>All RideIDs that may refer to the same sim entity (snapshot id + roster matches).</summary>
+    List<RideID> ResolveRideIdCandidates(RideID snapshotId)
+    {
+        var candidates = new List<RideID>();
+        if (!IsValidRideId(snapshotId))
+            return candidates;
+
+        var seen = new HashSet<(int, int)>();
+        void TryAdd(RideID id)
+        {
+            if (!IsValidRideId(id) || !seen.Add((id.id, id.version)))
+                return;
+            candidates.Add(id);
+        }
+
+        TryAdd(snapshotId);
         int entityId = snapshotId.id;
+        ITransformSystem transformSystem = api.GetSystem<ITransformSystem>();
+        RideVector3 spawnHint = SpawnWorldForEntity(FriendlySpawnsForReset(), snapshotId);
+        if (SameRideEntityId(snapshotId, m_enemy))
+            spawnHint = SpawnWorldForEntity(EnemySpawnsForReset(), snapshotId);
+
+        var spatialAnchor = new Vector3((float)spawnHint.x, (float)spawnHint.y, (float)spawnHint.z);
         foreach (Team team in new[] { Team.Blue, Team.Red })
         {
             IEnumerable<RideID> roster = api.scenarioSystem.GetAgents(team);
-            if (roster == null)
-                continue;
-            foreach (RideID id in roster)
+            if (roster != null)
             {
-                if (id.id == entityId)
-                    return id;
+                foreach (RideID id in roster)
+                {
+                    if (id.id == entityId)
+                        TryAdd(id);
+                }
+            }
+
+            IEnumerable<RideID> nearSpawn = api.scenarioSystem.GetAgents(
+                spatialAnchor,
+                Mathf.Max(squadMaxMemberSpacingM, 5f),
+                team);
+            if (nearSpawn != null)
+            {
+                foreach (RideID id in nearSpawn)
+                {
+                    if (id.id == entityId)
+                        TryAdd(id);
+                }
+            }
+
+            if (TryGetRidePosition(snapshotId, out RideVector3 livePos))
+            {
+                IEnumerable<RideID> nearLive = api.scenarioSystem.GetAgents(
+                    new Vector3((float)livePos.x, (float)livePos.y, (float)livePos.z),
+                    Mathf.Max(squadMaxMemberSpacingM, 5f),
+                    team);
+                if (nearLive != null)
+                {
+                    foreach (RideID id in nearLive)
+                    {
+                        if (id.id == entityId)
+                            TryAdd(id);
+                    }
+                }
             }
         }
 
-        return snapshotId;
+        return candidates;
     }
 
     RideID OperationRideId(RideID snapshotId) =>
@@ -595,7 +582,7 @@ public class AGAMOTTO_ATD_Agent : RLAgent
     {
         if (_lockedFriendlySpawnWorld != null && _lockedEnemySpawnWorld != null)
             return;
-        if (_friendlySpawnWorld == null || _friendlySpawnWorld.Count < 4)
+        if (_friendlySpawnWorld == null || _friendlySpawnWorld.Count < 2)
             return;
         if (_enemySpawnWorld == null || _enemySpawnWorld.Count < 1)
             return;
@@ -621,16 +608,18 @@ public class AGAMOTTO_ATD_Agent : RLAgent
         IEnumerable<RideID> ids,
         ITransformSystem ts)
     {
-        var list = new List<(RideID id, RideVector3 world)>();
+        var dict = new Dictionary<int, (RideID id, RideVector3 world)>();
         if (ids == null)
-            return list;
+            return new List<(RideID id, RideVector3 world)>();
+
         foreach (RideID id in ids)
         {
-            if (!IsValidRideId(id))
+            if (!IsValidRideId(id) || !TryGetRidePosition(id, out RideVector3 live))
                 continue;
-            list.Add((id, ts.GetPosition(id)));
+            dict[EntityIdKey(id)] = (id, live);
         }
-        return list;
+
+        return dict.Values.ToList();
     }
 
     public void EnableRlCombatEngagement()
@@ -655,14 +644,14 @@ public class AGAMOTTO_ATD_Agent : RLAgent
         IEnumerable<RideID> incoming,
         ITransformSystem ts)
     {
-        var dict = new Dictionary<(int, int), (RideID id, RideVector3 world)>();
+        var dict = new Dictionary<int, (RideID id, RideVector3 world)>();
         if (prior != null)
         {
             foreach (var pair in prior)
             {
                 if (!IsValidRideId(pair.id))
                     continue;
-                dict[AliveKey(pair.id)] = pair;
+                dict[EntityIdKey(pair.id)] = pair;
             }
         }
 
@@ -672,35 +661,355 @@ public class AGAMOTTO_ATD_Agent : RLAgent
             {
                 if (!IsValidRideId(id))
                     continue;
-                dict[AliveKey(id)] = (id, ts.GetPosition(id));
+                int key = EntityIdKey(id);
+                if (!dict.TryGetValue(key, out var existing))
+                {
+                    if (!TryGetRidePosition(id, out RideVector3 live))
+                        continue;
+                    dict[key] = (id, live);
+                    continue;
+                }
+
+                // Keep locked world pose; refresh RideID version from live sim.
+                dict[key] = (id, existing.world);
             }
         }
 
-        var result = new List<(RideID id, RideVector3 world)>(dict.Count);
-        foreach (var pair in dict.Values)
-            result.Add(pair);
+        return dict.Values.ToList();
+    }
+
+    void RefreshSpawnRideIdsFromRoster()
+    {
+        RefreshSpawnListRideIds(_friendlySpawnWorld, Team.Blue);
+        RefreshSpawnListRideIds(_enemySpawnWorld, Team.Red);
+        if (_lockedFriendlySpawnWorld != null)
+            RefreshSpawnListRideIds(_lockedFriendlySpawnWorld, Team.Blue);
+        if (_lockedEnemySpawnWorld != null)
+            RefreshSpawnListRideIds(_lockedEnemySpawnWorld, Team.Red);
+    }
+
+    static void RefreshSpawnListRideIds(List<(RideID id, RideVector3 world)> list, Team team)
+    {
+        if (list == null || list.Count == 0)
+            return;
+
+        var roster = Globals.api.scenarioSystem.GetAgents(team);
+        if (roster == null)
+            return;
+
+        var liveByEntity = new Dictionary<int, RideID>();
+        foreach (RideID id in roster)
+        {
+            if (!IsValidRideId(id))
+                continue;
+            liveByEntity[id.id] = id;
+        }
+
+        for (int i = 0; i < list.Count; i++)
+        {
+            var row = list[i];
+            if (liveByEntity.TryGetValue(EntityIdKey(row.id), out RideID live))
+                list[i] = (live, row.world);
+        }
+    }
+
+    void AugmentSpawnSnapshotsFromTacticalGroup()
+    {
+        if (!IsValidRideId(m_squadTacticalGroup))
+            return;
+
+        List<RideID> members = CollectTacticalGroupMembers(m_squadTacticalGroup);
+        if (members.Count == 0)
+            return;
+
+        ITransformSystem ts = api.GetSystem<ITransformSystem>();
+        _friendlySpawnWorld = MergeSpawnSnapshot(_friendlySpawnWorld, members, ts);
+        if (_lockedFriendlySpawnWorld != null)
+            _lockedFriendlySpawnWorld = MergeSpawnSnapshot(_lockedFriendlySpawnWorld, members, ts);
+        BuildFriendlySquadOffsetsFromSpawns();
+    }
+
+    List<RideID> CollectTacticalGroupMembers(RideID tacticalGroup)
+    {
+        var result = new List<RideID>();
+        var gs = api.groupSystem;
+        if (gs == null || !IsValidRideId(tacticalGroup))
+            return result;
+
+        var seen = new HashSet<int>();
+        void TryAdd(RideID id)
+        {
+            if (!IsValidRideId(id) || !seen.Add(id.id))
+                return;
+            result.Add(id);
+        }
+
+        foreach (string methodName in new[]
+        {
+            "GetGroupMembers",
+            "GetAgentsInGroup",
+            "GetGroupAgents",
+            "EnumerateGroupMembers",
+            "GetMembers",
+        })
+        {
+            try
+            {
+                MethodInfo method = gs.GetType().GetMethod(
+                    methodName,
+                    BindingFlags.Public | BindingFlags.Instance,
+                    null,
+                    new[] { typeof(RideID) },
+                    null);
+                if (method == null)
+                    continue;
+                if (method.Invoke(gs, new object[] { tacticalGroup }) is IEnumerable<RideID> ids)
+                {
+                    foreach (RideID id in ids)
+                        TryAdd(id);
+                }
+            }
+            catch
+            {
+                /* optional API */
+            }
+        }
+
+        TryAdd(gs.GetGroupLeader(tacticalGroup));
+        TryAdd(agent);
+
+        IEnumerable<RideID> blues = api.scenarioSystem.GetAgents(Team.Blue);
+        if (blues != null)
+        {
+            foreach (RideID id in blues)
+            {
+                RideID group = TryResolveAgentTacticalGroup(gs, id);
+                if (group.id == tacticalGroup.id)
+                    TryAdd(id);
+            }
+        }
+
         return result;
     }
 
+    static RideID TryResolveAgentTacticalGroup(object groupSystem, RideID agentId)
+    {
+        if (groupSystem == null || !IsValidRideId(agentId))
+            return default;
+
+        foreach (string methodName in new[]
+        {
+            "GetAgentGroup",
+            "GetGroupForAgent",
+            "GetAgentsGroup",
+            "GetTacticalGroup",
+        })
+        {
+            try
+            {
+                MethodInfo method = groupSystem.GetType().GetMethod(
+                    methodName,
+                    BindingFlags.Public | BindingFlags.Instance,
+                    null,
+                    new[] { typeof(RideID) },
+                    null);
+                if (method == null)
+                    continue;
+                if (method.Invoke(groupSystem, new object[] { agentId }) is RideID group && IsValidRideId(group))
+                    return group;
+            }
+            catch
+            {
+                /* optional API */
+            }
+        }
+
+        return default;
+    }
+
     /// <summary>
-    /// Restores HP/state and teleports each squad member to spawn anchors (RIDE <see cref="IAgentSystem.ReviveAgent"/> alone does not reset health).
+    /// Restores HP/state and teleports each squad member to spawn anchors.
+    /// Phase 1: revive all (wingmen then leader). Phase 2: teleport. Phase 3: retry any still dead.
     /// </summary>
     void TeleportTeamToSpawnWorld(IEnumerable<(RideID id, RideVector3 world)> spawns)
     {
         if (spawns == null)
             return;
-        IMovementSystem movementSystem = api.movementSystem;
+
+        var rows = spawns.Where(p => IsValidRideId(p.id)).ToList();
+        if (rows.Count == 0)
+            return;
+
         IAgentSystem agentSystem = Globals.api.agentSystem;
-        foreach (var pair in spawns)
+        IMovementSystem movementSystem = api.movementSystem;
+
+        RideVector3 LeaderSpawn()
         {
-            if (!IsValidRideId(pair.id))
+            foreach (var pair in rows)
+            {
+                if (SameRideEntityId(pair.id, agent))
+                    return pair.world;
+            }
+
+            return SpawnWorldForEntity(rows, agent);
+        }
+
+        void ReviveRow(RideID snapshotId)
+        {
+            RideID target = SameRideEntityId(snapshotId, agent) ? agent : snapshotId;
+            ForceReviveRideId(target, agentSystem);
+        }
+
+        void TeleportRow(RideID snapshotId, RideVector3 world)
+        {
+            RideID target = SameRideEntityId(snapshotId, agent) ? agent : ResolveLiveRideId(snapshotId);
+            movementSystem.MoveTeleport(target, world);
+        }
+
+        foreach (var pair in rows)
+        {
+            if (SameRideEntityId(pair.id, agent))
+                continue;
+            ReviveRow(pair.id);
+        }
+
+        ReviveRow(agent);
+
+        foreach (var pair in rows)
+        {
+            if (SameRideEntityId(pair.id, agent))
+                continue;
+            TeleportRow(pair.id, pair.world);
+        }
+
+        TeleportRow(agent, LeaderSpawn());
+
+        foreach (var pair in rows)
+        {
+            RideID live = SameRideEntityId(pair.id, agent) ? agent : ResolveLiveRideId(pair.id);
+            if (!agentSystem.IsAgentDead(live))
                 continue;
             RestoreAgentAtSpawn(pair.id, pair.world, agentSystem, movementSystem);
         }
     }
 
+    void ForceReviveRideId(RideID rideId, IAgentSystem agentSystem)
+    {
+        if (!IsValidRideId(rideId))
+            return;
+
+        foreach (RideID candidate in ResolveRideIdCandidates(rideId))
+        {
+            RideID id = SameRideEntityId(candidate, agent) ? agent : candidate;
+            if (!IsValidRideId(id))
+                continue;
+
+            bool wasDead = agentSystem.IsAgentDead(id);
+            float hp = agentSystem.GetAgentHealth(id);
+            if (wasDead || hp <= 0.01f)
+            {
+                agentSystem.SetAgentHealthFull(id);
+                if (agentSystem.GetAgentState(id) == StateMachineUtils.DeadState)
+                    agentSystem.SetAgentState(id, StateMachineUtils.IdleState);
+            }
+
+            agentSystem.ReviveAgent(id);
+            agentSystem.SetHealthBarVisible(id, true);
+
+            if (wasDead || agentSystem.IsAgentDead(id) || agentSystem.GetAgentHealth(id) <= 0.01f)
+            {
+                agentSystem.SetAgentHealthFull(id);
+                if (agentSystem.GetAgentState(id) == StateMachineUtils.DeadState)
+                    agentSystem.SetAgentState(id, StateMachineUtils.IdleState);
+                agentSystem.ReviveAgent(id);
+            }
+        }
+    }
+
+    void ScanAndRestoreDeadSnapshotAgents(IAgentSystem agentSystem, IMovementSystem movementSystem)
+    {
+        var spawnByEntity = new Dictionary<int, RideVector3>();
+        foreach (var pair in CollectAllSpawnEntries())
+            spawnByEntity[EntityIdKey(pair.id)] = pair.world;
+
+        RideVector3 leaderSpawn = SpawnWorldForEntity(FriendlySpawnsForReset(), agent);
+        if (_friendlySquadOffsets != null)
+        {
+            foreach (var offset in _friendlySquadOffsets)
+            {
+                if (spawnByEntity.ContainsKey(offset.entityId))
+                    continue;
+                spawnByEntity[offset.entityId] = new RideVector3(
+                    (float)(leaderSpawn.x + offset.offsetX),
+                    (float)(leaderSpawn.y + offset.offsetY),
+                    (float)(leaderSpawn.z + offset.offsetZ));
+            }
+        }
+
+        ITransformSystem transformSystem = api.GetSystem<ITransformSystem>();
+        foreach (Team team in new[] { Team.Blue, Team.Red })
+        {
+            IEnumerable<RideID> roster = api.scenarioSystem.GetAgents(team);
+            if (roster == null)
+                continue;
+            foreach (RideID id in roster)
+            {
+                if (!IsValidRideId(id) || !agentSystem.IsAgentDead(id))
+                    continue;
+                if (!spawnByEntity.TryGetValue(id.id, out RideVector3 spawn))
+                    continue;
+                RestoreAgentAtSpawn(id, spawn, agentSystem, movementSystem);
+            }
+        }
+
+        foreach (var pair in CollectAllSpawnEntries())
+        {
+            if (!spawnByEntity.TryGetValue(EntityIdKey(pair.id), out RideVector3 spawn))
+                continue;
+
+            foreach (RideID candidate in ResolveRideIdCandidates(pair.id))
+            {
+                RideVector3 corpseHint = transformSystem.GetPosition(candidate);
+                foreach (Team team in new[] { Team.Blue, Team.Red })
+                {
+                    IEnumerable<RideID> nearCorpse = api.scenarioSystem.GetAgents(
+                        new Vector3((float)corpseHint.x, (float)corpseHint.y, (float)corpseHint.z),
+                        Mathf.Max(squadFormationFallbackMaxHorizontalM, 50f),
+                        team);
+                    if (nearCorpse == null)
+                        continue;
+                    foreach (RideID id in nearCorpse)
+                    {
+                        if (id.id != EntityIdKey(pair.id) || !agentSystem.IsAgentDead(id))
+                            continue;
+                        RestoreAgentAtSpawn(id, spawn, agentSystem, movementSystem);
+                    }
+                }
+            }
+        }
+
+        foreach (var kv in spawnByEntity)
+        {
+            RideID snapshot = default;
+            foreach (var pair in CollectAllSpawnEntries())
+            {
+                if (EntityIdKey(pair.id) != kv.Key)
+                    continue;
+                snapshot = pair.id;
+                break;
+            }
+
+            if (!IsValidRideId(snapshot))
+                continue;
+            RideID live = SameRideEntityId(snapshot, agent) ? agent : ResolveLiveRideId(snapshot);
+            if (agentSystem.IsAgentDead(live))
+                RestoreAgentAtSpawn(snapshot, kv.Value, agentSystem, movementSystem);
+        }
+    }
+
     /// <summary>
-    /// Full combat reset: max health, leave Dead state, movement revive hook, then teleport.
+    /// Full combat reset: revive, max health, leave Dead state, then teleport to spawn anchor.
+    /// Tries every RideID candidate for the entity because dead agents can lag snapshot versions.
     /// </summary>
     void RestoreAgentAtSpawn(
         RideID snapshotId,
@@ -711,26 +1020,220 @@ public class AGAMOTTO_ATD_Agent : RLAgent
         if (!IsValidRideId(snapshotId))
             return;
 
-        RideID live = OperationRideId(snapshotId);
-        bool wasDead = agentSystem.IsAgentDead(live);
+        List<RideID> candidates = ResolveRideIdCandidates(snapshotId);
+        if (candidates.Count == 0)
+            candidates.Add(snapshotId);
 
-        if (wasDead)
+        bool restored = false;
+        foreach (RideID candidate in candidates)
         {
-            agentSystem.SetAgentHealthFull(live);
-            if (agentSystem.GetAgentState(live) == StateMachineUtils.DeadState)
-                agentSystem.SetAgentState(live, StateMachineUtils.IdleState);
+            if (TryRestoreRideIdAtSpawn(candidate, spawn, agentSystem, movementSystem))
+                restored = true;
         }
 
-        agentSystem.ReviveAgent(live);
-        agentSystem.SetHealthBarVisible(live, true);
-        movementSystem.MoveTeleport(live, spawn);
-
-        if (wasDead && agentSystem.IsAgentDead(live))
+        if (!restored)
         {
             Debug.LogWarning(
-                $"AGAMOTTO_ATD_Agent: Agent id={live.id} v={live.version} still dead after SetAgentHealthFull "
-                + $"(hp={agentSystem.GetAgentHealth(live):F2}, state={agentSystem.GetAgentState(live)}).");
+                $"AGAMOTTO_ATD_Agent: Could not restore entity id={snapshotId.id} at spawn "
+                + $"({spawn.x:F1},{spawn.y:F1},{spawn.z:F1}).");
         }
+    }
+
+    bool TryRestoreRideIdAtSpawn(
+        RideID rideId,
+        RideVector3 spawn,
+        IAgentSystem agentSystem,
+        IMovementSystem movementSystem)
+    {
+        if (!IsValidRideId(rideId))
+            return false;
+
+        RideID id = SameRideEntityId(rideId, agent) ? agent : rideId;
+        ForceReviveRideId(id, agentSystem);
+        movementSystem.MoveTeleport(SameRideEntityId(rideId, agent) ? agent : ResolveLiveRideId(rideId), spawn);
+
+        RideID verify = SameRideEntityId(rideId, agent) ? agent : ResolveLiveRideId(rideId);
+        if (agentSystem.IsAgentDead(verify))
+        {
+            ForceReviveRideId(verify, agentSystem);
+            movementSystem.MoveTeleport(verify, spawn);
+        }
+
+        if (agentSystem.IsAgentDead(verify))
+        {
+            Debug.LogWarning(
+                $"AGAMOTTO_ATD_Agent: Agent id={verify.id} v={verify.version} still dead after revive "
+                + $"(hp={agentSystem.GetAgentHealth(verify):F2}, state={agentSystem.GetAgentState(verify)}).");
+            return false;
+        }
+
+        return true;
+    }
+
+    List<(RideID id, RideVector3 world)> CollectAllSpawnEntries()
+    {
+        var merged = new Dictionary<int, (RideID id, RideVector3 world)>();
+        void AddRange(IEnumerable<(RideID id, RideVector3 world)> spawns)
+        {
+            if (spawns == null)
+                return;
+            foreach (var pair in spawns)
+            {
+                if (!IsValidRideId(pair.id))
+                    continue;
+                merged[EntityIdKey(pair.id)] = pair;
+            }
+        }
+
+        AddRange(FriendlySpawnsForReset());
+        AddRange(EnemySpawnsForReset());
+        if (IsValidRideId(agent))
+            merged[EntityIdKey(agent)] = (agent, SpawnWorldForEntity(FriendlySpawnsForReset(), agent));
+        if (HasAssignedEnemy(m_enemy))
+            merged[EntityIdKey(m_enemy)] = (m_enemy, SpawnWorldForEntity(EnemySpawnsForReset(), m_enemy));
+
+        return merged.Values.ToList();
+    }
+
+    /// <summary>
+    /// Armed after the first OnEpisodeBegin. Academy ForcedFullReset on attach must not
+    /// destroy the CoT-spawned squad while InitMLBehaviour is still running.
+    /// </summary>
+    bool _episodeDestroyRespawnArmed;
+
+    internal static bool RideEntityExists(RideID id)
+    {
+        if (!IsValidRideId(id) || Globals.api == null)
+            return false;
+        var gos = Globals.api.GetSystem<IGameObjectSystem>();
+        return gos != null && gos.Exists(id);
+    }
+
+    internal static bool TryGetRidePosition(RideID id, out RideVector3 pos)
+    {
+        pos = RideVector3.zero;
+        if (!RideEntityExists(id))
+            return false;
+        pos = Globals.api.GetSystem<ITransformSystem>().GetPosition(id);
+        return true;
+    }
+
+    bool ShouldUseEpisodeDestroyRespawn()
+    {
+        if (!AGAMOTTO_EpisodeRespawn.HasRegisteredSpawns)
+            return false;
+
+        // SAC / Training from WinTAK: keep the live CoT spawn until a trainer is driving
+        // episode boundaries. Destroying on attach CollectObservations + GetPosition-fails
+        // the leader that InitMLBehaviour is still using.
+        if (!_episodeDestroyRespawnArmed)
+            return false;
+        if (!IsExternalTrainerConnected())
+            return false;
+        return true;
+    }
+
+    /// <summary>Destroy all CoT-spawned squads and recreate them from original spawn specs (no revive/teleport).</summary>
+    void ResetEpisodeSquadsToSpawnAnchors(string reason)
+    {
+        if (!ShouldUseEpisodeDestroyRespawn())
+        {
+            Debug.Log(
+                $"AGAMOTTO_ATD_Agent: Episode destroy+respawn ({reason}) skipped "
+                + "(first episode, no trainer, or hybrid expert baseline).");
+            return;
+        }
+
+        if (Time.time - _lastEpisodeRespawnTime < 0.25f)
+            return;
+
+        SuppressCombatDuringReset();
+
+        // This ATD agent is the persistent ML-Agents agent driving training. Per-episode reset
+        // respawns the squad bodies and re-points THIS agent (ApplyEpisodeRespawnResult); it must
+        // NOT reattach a new RL behavior (that re-enters OnEnable -> OnEpisodeBegin -> respawn,
+        // looping episode 1 forever and re-disposing the Academy).
+        if (!AGAMOTTO_EpisodeRespawn.TryRespawnAllUnits(
+                out AGAMOTTO_EpisodeRespawn.RespawnResult result,
+                attachRlPolicy: false))
+        {
+            Debug.LogWarning(
+                $"AGAMOTTO_ATD_Agent: Episode destroy+respawn ({reason}) skipped — no spawn registry.");
+            return;
+        }
+
+        _lastEpisodeRespawnTime = Time.time;
+        ApplyEpisodeRespawnResult(result);
+
+        // Fresh-spawned entities can register dead/zero-HP on the same frame, leaving the leader
+        // with no movable body and every terminal suppressed (alive-at-start gates). Force-revive
+        // + full-heal the leader and primary enemy at their spawns so the episode actually runs.
+        IAgentSystem respawnAgentSystem = Globals.api.agentSystem;
+        IMovementSystem respawnMovementSystem = api.movementSystem;
+        ForceReviveLeaderAtSpawn(respawnAgentSystem, respawnMovementSystem);
+        ResetPrimaryEnemyForNewEpisode(respawnAgentSystem, respawnMovementSystem);
+
+        Debug.Log(
+            $"AGAMOTTO_ATD_Agent: Episode destroy+respawn ({reason}) — "
+            + $"leader={agent.id} (dead={respawnAgentSystem.IsAgentDead(LeaderRideIdForSim())}), "
+            + $"enemy={m_enemy.id} (dead={(HasAssignedEnemy(m_enemy) && respawnAgentSystem.IsAgentDead(m_enemy))}).");
+    }
+
+    void ApplyEpisodeRespawnResult(AGAMOTTO_EpisodeRespawn.RespawnResult result)
+    {
+        if (!result.Success || !IsValidRideId(result.FriendlyLeader))
+            return;
+
+        Init(api, result.FriendlyLeader);
+        m_squadTacticalGroup = result.FriendlyTacticalGroup;
+        m_startingPosition = result.FriendlyLeaderSpawn;
+
+        if (HasAssignedEnemy(result.PrimaryEnemy))
+        {
+            m_enemy = result.PrimaryEnemy;
+            m_enemyStartingPosition = result.EnemySpawn;
+        }
+
+        CaptureSpawnSnapshotsAfterRespawn();
+        SyncLeaderUnityTransformFromRide();
+        previousPosition = GetAgentWorldPosition();
+
+        Rigidbody rb = agentTransform.GetComponent<Rigidbody>();
+        if (rb != null)
+        {
+            rb.velocity = Vector3.zero;
+            rb.angularVelocity = Vector3.zero;
+        }
+    }
+
+    void CaptureSpawnSnapshotsAfterRespawn()
+    {
+        _lockedFriendlySpawnWorld = null;
+        _lockedEnemySpawnWorld = null;
+
+        List<RideID> friendlies = CollectTacticalGroupMembers(m_squadTacticalGroup);
+        if (friendlies.Count == 0 && IsValidRideId(agent))
+            friendlies.Add(agent);
+
+        var hostiles = new List<RideID>();
+        if (HasAssignedEnemy(m_enemy))
+        {
+            hostiles.Add(m_enemy);
+            IEnumerable<RideID> nearEnemy = api.scenarioSystem.GetAgents(m_enemyStartingPosition, 80f, Team.Red);
+            if (nearEnemy != null)
+            {
+                foreach (RideID id in nearEnemy)
+                {
+                    if (!IsValidRideId(id) || hostiles.Exists(h => SameRideEntityId(h, id)))
+                        continue;
+                    hostiles.Add(id);
+                }
+            }
+        }
+
+        ReplaceEpisodeSpawnSnapshots(friendlies, hostiles);
+        TryLockEpisodeSpawnAnchors();
+        RefreshSquadAliveBaselines(Globals.api.agentSystem);
     }
 
     RideVector3 SpawnWorldForEntity(IEnumerable<(RideID id, RideVector3 world)> spawns, RideID entity)
@@ -765,6 +1268,7 @@ public class AGAMOTTO_ATD_Agent : RLAgent
 
     void SyncCombatForCurrentStep()
     {
+
         if (stepCount <= combatTerminalWarmupSteps)
             SuppressCombatDuringReset();
         else if (!_episodeCombatEnabled)
@@ -794,14 +1298,19 @@ public class AGAMOTTO_ATD_Agent : RLAgent
 
     void SyncLeaderUnityTransformFromRide()
     {
-        RideVector3 p = api.GetSystem<ITransformSystem>().GetPosition(agent);
+        if (agentTransform == null || !TryGetRidePosition(agent, out RideVector3 p))
+            return;
         agentTransform.position = new Vector3((float)p.x, (float)p.y, (float)p.z);
     }
 
     /// <summary>Leader world position from RIDE sim state (Unity transform can lag).</summary>
     Vector3 GetAgentWorldPosition()
     {
-        RideVector3 p = api.GetSystem<ITransformSystem>().GetPosition(agent);
+        if (api == null || !IsValidRideId(agent))
+            return agentTransform != null ? agentTransform.position : Vector3.zero;
+
+        if (!TryGetRidePosition(agent, out RideVector3 p))
+            return agentTransform != null ? agentTransform.position : Vector3.zero;
         return new Vector3((float)p.x, (float)p.y, (float)p.z);
     }
 
@@ -809,65 +1318,20 @@ public class AGAMOTTO_ATD_Agent : RLAgent
     {
         base.OnEpisodeBegin();
 
+        AGAMOTTO_EvaluationRunConfig.InvalidateCache();
+        AGAMOTTO_EvaluationRunConfig.TryApplyToAgent(this);
+
         episodeCounter++;
         Debug.Log($"Episode {episodeCounter}...");
+
+        ResetEpisodeSquadsToSpawnAnchors("begin");
+        _episodeDestroyRespawnArmed = true;
+
         IAgentSystem agentSystem = Globals.api.agentSystem;
-        IMovementSystem movementSystem = Globals.api.movementSystem;
 
-        Debug.Log($"Episode reset, moving agent from {agentTransform.position} to start; enemy to {m_enemyStartingPosition}");
-
-        SuppressCombatDuringReset();
-
-        var friendlySpawns = FriendlySpawnsForReset();
-        var enemySpawns = EnemySpawnsForReset();
-
-        // Friendlies first (revive + teleport), then hostiles — avoids crossfire during reset.
-        if (friendlySpawns != null && friendlySpawns.Any())
-        {
-            TeleportTeamToSpawnWorld(friendlySpawns);
-            Debug.Log($"AGAMOTTO_ATD_Agent: Teleported friendly squad to spawn anchors.");
-        }
-        else
-        {
-            EnsureLeaderInFriendlySpawnSnapshot();
-            RestoreAgentAtSpawn(agent, m_startingPosition, agentSystem, movementSystem);
-            Debug.LogWarning("AGAMOTTO_ATD_Agent: No friendly spawn snapshot; using formation delta to m_startingPosition.");
-            TeleportFriendlySquadPreservingFormation(m_startingPosition);
-        }
-
-        if (enemySpawns != null && enemySpawns.Any())
-        {
-            TeleportTeamToSpawnWorld(enemySpawns);
-            Debug.Log($"AGAMOTTO_ATD_Agent: Teleported hostile squad to spawn anchors.");
-        }
-
-        ResetPrimaryEnemyForNewEpisode(agentSystem, movementSystem);
-        ForceReviveLeaderAtSpawn(agentSystem, movementSystem);
-
-        SyncLeaderUnityTransformFromRide();
-
-        // Align reward / obs bookkeeping with simulation pose (not the ML-Agents Unity transform).
-        previousPosition = GetAgentWorldPosition();
-
-        Rigidbody rb = agentTransform.GetComponent<Rigidbody>();
-        if (rb != null)
-        {
-            rb.velocity = Vector3.zero;
-            rb.angularVelocity = Vector3.zero;
-        }
-
-        if (IsLeaderDead(agentSystem))
-        {
-            Debug.LogWarning(
-                $"AGAMOTTO_ATD_Agent: Leader still dead after reset at step {stepCount} "
-                + $"(entity id={agent.id}); retrying revive at spawn anchor.");
-            ForceReviveLeaderAtSpawn(agentSystem, movementSystem);
-        }
-
-        if ((enemySpawns == null || !enemySpawns.Any()) && !HasAssignedEnemy(m_enemy))
+        if ((EnemySpawnsForReset() == null || !EnemySpawnsForReset().Any()) && !HasAssignedEnemy(m_enemy))
             Debug.LogWarning("AGAMOTTO_ATD_Agent: m_enemy is not assigned; skipping enemy reset.");
 
-        m_enemy = ResolveLiveRideId(m_enemy);
         _leaderAliveAtEpisodeStart = !IsLeaderDead(agentSystem);
         _primaryEnemyAliveAtEpisodeStart =
             HasAssignedEnemy(m_enemy) && !agentSystem.IsAgentDead(m_enemy);
@@ -889,23 +1353,13 @@ public class AGAMOTTO_ATD_Agent : RLAgent
         RefreshSquadAliveBaselines(agentSystem);
         ResetEpisodeKillCounters();
         _loggedSquadMoveThisEpisode = false;
+        _loggedFirstActionThisEpisode = false;
 
-        if (_awacHybridEnabled)
+        if (_inferenceRun)
         {
-            if (AGAMOTTO_HybridAwacHub.SessionExpertBaselineComplete)
-            {
-                _expertBaselineComplete = true;
-            }
-            else
-            {
-                _expertBaselineComplete = false;
-                _expertWaypointIndex = 0;
-                AGAMOTTO_HybridAwacHub.RestoreExpertBaselinePhaseIfNeeded();
-                AGAMOTTO_ExpertTrajectoryRecorder.OnExpertEpisodeBegin();
-                if (AGAMOTTO_HybridAwacHub.TryGetActiveExpertWaypoints(out var waypoints))
-                    _expertWaypointsWorld = waypoints;
-            }
-            SyncAwacBehaviorMode();
+            _inferenceRoute.Clear();
+            if (_behaviorParameters != null)
+                _behaviorParameters.BehaviorType = BehaviorType.InferenceOnly;
         }
     }
 
@@ -921,7 +1375,11 @@ public class AGAMOTTO_ATD_Agent : RLAgent
         Debug.Log(
             $"AGAMOTTO_ATD_Agent: Episode {episodeCounter} end ({outcome}) — "
             + $"enemies_killed={_episodeEnemiesKilled}, friendlies_lost={_episodeFriendliesLost}, "
-            + $"step={stepCount}, cumulative_reward={GetCumulativeReward():F3}");
+            + $"step={stepCount}, "
+            + $"cumulative_reward={GetCumulativeReward():F3}");
+
+        if (!Academy.IsInitialized)
+            return;
 
         if (Academy.Instance?.StatsRecorder == null)
             return;
@@ -938,6 +1396,11 @@ public class AGAMOTTO_ATD_Agent : RLAgent
     void EndEpisodeWithTrainingStats(string outcome)
     {
         LogAndRecordEpisodeKillStats(outcome);
+        bool success = outcome == "primary_enemy_killed";
+        if (_inferenceRun)
+            NotifyTakInferenceOutcome(success, outcome);
+        else
+            NotifyTakTrainingOutcome(success, outcome);
         EndEpisode();
     }
 
@@ -1088,12 +1551,11 @@ public class AGAMOTTO_ATD_Agent : RLAgent
     /// <summary>
     /// v2b vector (10): rel enemy xz (2), rel height (1), dist primary (1), bearing sin/cos (2),
     /// primary alive (1), enemy squad alive ratio (1), wingman alive ratio (1), step fraction (1).
-    /// Must match <c>BehaviorParameters.VectorObservationSize</c> and expert buffer (10).
+    /// Must match <c>BehaviorParameters.VectorObservationSize</c> (10).
     /// </summary>
     public override void CollectObservations(VectorSensor sensor)
     {
-        // Do not call base.CollectObservations — RIDE RLAgent adds extra dims that are not
-        // in the expert buffer (SnapshotObservation) or BehaviorParameters.VectorObservationSize.
+        // Do not call base.CollectObservations — RIDE RLAgent adds extra dims.
 
         IAgentSystem agentSystem = Globals.api.agentSystem;
         Vector3 agentPos = GetAgentWorldPosition();
@@ -1101,8 +1563,8 @@ public class AGAMOTTO_ATD_Agent : RLAgent
         float H = Mathf.Max(observationHeightScaleM, 1f);
 
         RideVector3 enemyRv;
-        if (HasAssignedEnemy(m_enemy))
-            enemyRv = api.GetSystem<ITransformSystem>().GetPosition(m_enemy);
+        if (HasAssignedEnemy(m_enemy) && TryGetRidePosition(m_enemy, out RideVector3 liveEnemy))
+            enemyRv = liveEnemy;
         else
             enemyRv = new RideVector3(agentPos.x, agentPos.y, agentPos.z);
 
@@ -1137,13 +1599,12 @@ public class AGAMOTTO_ATD_Agent : RLAgent
         // Light penalty so the policy learns to avoid clutter in large environments without ending every bump.
         AddReward(-0.002f);
     }
-    protected override void TakeAction(ActionBuffers actions)
+    bool RunPolicyStep(float policyX, float policyZ)
     {
         IAgentSystem agentSystem = Globals.api.agentSystem;
         SyncCombatForCurrentStep();
         bool inCombatWarmup = stepCount <= combatTerminalWarmupSteps;
-        float rewardAtStepStart = GetCumulativeReward();
-        SnapshotObservation();
+        RecordInferenceRouteSample();
 
         if (!inCombatWarmup)
             ApplySquadCombatDeathRewards(agentSystem);
@@ -1155,12 +1616,9 @@ public class AGAMOTTO_ATD_Agent : RLAgent
         {
             Debug.Log($"AGAMOTTO_ATD_Agent: Episode success — primary enemy eliminated id={m_enemy.id} v={m_enemy.version}.");
             AddReward(m_successReward);
-            NotifyTakTrainingOutcome(true, "primary_enemy_killed");
-            DispatchTrainingResult(true);
             suppressStepPunishmentThisAction = true;
-            RecordExpertTransitionIfNeeded(rewardAtStepStart, 0f, 0f, 0f, 0f, true);
             EndEpisodeWithTrainingStats("primary_enemy_killed");
-            return;
+            return false;
         }
 
         if (!inCombatWarmup && _leaderAliveAtEpisodeStart && IsLeaderDead(agentSystem))
@@ -1169,50 +1627,23 @@ public class AGAMOTTO_ATD_Agent : RLAgent
             Debug.Log($"AGAMOTTO_ATD_Agent: Episode failure — RL leader killed id={leader.id} v={leader.version}.");
             _episodeFriendliesLost++;
             AddReward(-1 * m_successReward);
-            NotifyTakTrainingOutcome(false, "leader_killed");
-            DispatchTrainingResult(false);
             suppressStepPunishmentThisAction = true;
-            RecordExpertTransitionIfNeeded(rewardAtStepStart, 0f, 0f, 0f, 0f, true);
             EndEpisodeWithTrainingStats("leader_killed");
-            return;
+            return false;
         }
 
-        float policyX = (float)System.Math.Tanh(actions.ContinuousActions[0]);
-        float policyZ = (float)System.Math.Tanh(actions.ContinuousActions[1]);
-        float expertX = policyX;
-        float expertZ = policyZ;
-        bool hasExpert = TryComputeExpertContinuousAction(out expertX, out expertZ);
-
-        float xmov = policyX;
-        float zmov = policyZ;
-        if (IsExpertBaselinePhase() && hasExpert)
-        {
-            xmov = expertX;
-            zmov = expertZ;
-        }
-        else if (_awacHybridEnabled
-            && AGAMOTTO_HybridAwacHub.SessionExpertBaselineComplete
-            && expertBlendDuringOnline > 0f
-            && hasExpert)
-        {
-            float blend = expertBlendDuringOnline;
-            xmov = Mathf.Lerp(policyX, expertX, blend);
-            zmov = Mathf.Lerp(policyZ, expertZ, blend);
-        }
-
-        Vector3 rawMove = new Vector3(xmov, 0f, zmov);
+        Vector3 rawMove = new Vector3(policyX, 0f, policyZ);
         if (rawMove.sqrMagnitude >= MinMoveDirectionSqr)
         {
             Vector3 direction = rawMove.normalized;
-
             var maxSpeed = Globals.api.agentSystem.GetAgentMaxSpeed(agent);
             float deltaTime = Mathf.Max(Time.deltaTime, MinDecisionDeltaSeconds);
             float stepDistance = Mathf.Max(maxSpeed * deltaTime, MinMoveStepMeters);
-
-            RideVector3 fromRide = api.GetSystem<ITransformSystem>().GetPosition(agent);
+            RideVector3 fromRide;
+            if (!TryGetRidePosition(agent, out fromRide))
+                return true;
             Vector3 from = new Vector3((float)fromRide.x, (float)fromRide.y, (float)fromRide.z);
             Vector3 newPos = from + direction * stepDistance;
-
             RideVector3 dest = new RideVector3(newPos.x, newPos.y, newPos.z);
             if (useSquadNavMeshPaths)
                 IssueFriendlySquadLeaderStepPath(dest);
@@ -1220,53 +1651,48 @@ public class AGAMOTTO_ATD_Agent : RLAgent
                 TeleportFriendlySquadPreservingFormation(dest);
         }
 
-        if (!HasAssignedEnemy(m_enemy))
-        {
-            RecordExpertTransitionIfNeeded(rewardAtStepStart, policyX, policyZ, expertX, expertZ, false);
-            MaybeCompleteExpertBaselinePhase();
-            return;
-        }
+        if (!HasAssignedEnemy(m_enemy) || !TryGetRidePosition(m_enemy, out RideVector3 enemyPos))
+            return true;
 
-        RideVector3 enemyPos = api.GetSystem<ITransformSystem>().GetPosition(m_enemy);
         Vector3 agentWorld = GetAgentWorldPosition();
         Vector3 enemyWorldV = new Vector3((float)enemyPos.x, (float)enemyPos.y, (float)enemyPos.z);
         float enemyDist = Vector3.Distance(agentWorld, enemyWorldV);
-
         float previousDistance = Vector3.Distance(previousPosition, enemyWorldV);
-
-
-        // Distance shaping should be small enough that terminal reward is still meaningful.
         if (enemyDist < previousDistance)
             AddReward(+0.002f);
         else
             AddReward(-0.0008f);
 
-        if(stepCount > MaxStep)
+        if (stepCount > MaxStep)
         {
-            NotifyTakTrainingOutcome(false, "max_step");
-            DispatchTrainingResult(false);
             Debug.Log($"Episode reset at step: {stepCount}");
             suppressStepPunishmentThisAction = true;
-            RecordExpertTransitionIfNeeded(rewardAtStepStart, policyX, policyZ, expertX, expertZ, true);
             EndEpisodeWithTrainingStats("max_step");
-            return;
+            return false;
         }
 
-        RecordExpertTransitionIfNeeded(rewardAtStepStart, policyX, policyZ, expertX, expertZ, false);
-        MaybeCompleteExpertBaselinePhase();
         previousPosition = GetAgentWorldPosition();
+        return true;
+    }
+
+    protected override void TakeAction(ActionBuffers actions)
+    {
+        float policyX = (float)System.Math.Tanh(actions.ContinuousActions[0]);
+        float policyZ = (float)System.Math.Tanh(actions.ContinuousActions[1]);
+        if (!_loggedFirstActionThisEpisode)
+        {
+            _loggedFirstActionThisEpisode = true;
+            Debug.Log(
+                $"AGAMOTTO_ATD_Agent: first policy action=({policyX:F3},{policyZ:F3}) "
+                + $"behaviorType={_behaviorParameters?.BehaviorType} "
+                + $"communicatorOn={IsExternalTrainerConnected()} leaderPos={GetAgentWorldPosition()}");
+        }
+        RunPolicyStep(policyX, policyZ);
     }
 
     public override void Heuristic(in ActionBuffers actionsOut)
     {
         var continuous = actionsOut.ContinuousActions;
-        if (IsExpertBaselinePhase() && TryComputeExpertContinuousAction(out float expertX, out float expertZ))
-        {
-            continuous[0] = expertX;
-            continuous[1] = expertZ;
-            return;
-        }
-
         continuous[0] = 0f;
         continuous[1] = 0f;
         if (Input.GetKey(KeyCode.D))
@@ -1278,6 +1704,7 @@ public class AGAMOTTO_ATD_Agent : RLAgent
         if (Input.GetKey(KeyCode.S))
             continuous[1] = -1f;
     }
+
 }
 #else
     public class TakeCoverMLAgent : RLAgent

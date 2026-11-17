@@ -16,7 +16,7 @@ using WinTak.Overlays.ViewModels;
 
 namespace AGAMOTTO.WinTAKMIL
 {
-    public enum DispatchMode { Evaluation, Training, Hybrid }
+    public enum DispatchMode { Evaluation, Training }
 
     internal class Orchestrator
     {
@@ -32,7 +32,7 @@ namespace AGAMOTTO.WinTAKMIL
             _coTHelper = new CoTHelper("127.0.0.1", 65432);
         }
 
-        /// <summary>Sets the TCP host/port used for the next send (AGAMOTTO Python listener).</summary>
+        /// <summary>Sets the TCP host/port used for the next send (Unity CoT listener on Play).</summary>
         public void ConfigureListener(string host, int port)
         {
             _coTHelper.SetEndpoint(host, port);
@@ -94,9 +94,7 @@ namespace AGAMOTTO.WinTAKMIL
             var cotMessages = new List<XDocument>();
             var sentKeys = new HashSet<(string uid, string type)>(); //avoid duplicates
             var sentRouteUids = new HashSet<string>();
-            var friendlyAnchors = mode == DispatchMode.Hybrid
-                ? CollectFriendlyAnchors(EnumerateAllNodes(rootItems))
-                : null;
+            var sentPointLatLon = new List<(double lat, double lon)>();
 
             foreach (var node in EnumerateAllNodes(rootItems))
             {
@@ -135,12 +133,6 @@ namespace AGAMOTTO.WinTAKMIL
                     if (sentRouteUids.Contains(uid)) continue;
 
                     var rName = mapItem.Name ?? "Route";
-                    if (mode == DispatchMode.Hybrid && friendlyAnchors != null && friendlyAnchors.Count > 0)
-                    {
-                        var linked = MatchNearestFriendlyCallsign(verts[0], friendlyAnchors);
-                        if (!string.IsNullOrWhiteSpace(linked))
-                            rName = linked;
-                    }
                     var routeEvt = BuildRouteEvent(uid, rName, DateTime.UtcNow, verts);
                     //cotMessages.Add(new XDocument(new XDeclaration("1.0", "UTF-8", "yes"), routeEvt));
                     var x = new XDocument(new XDeclaration("1.0", "UTF-8", "yes"), routeEvt);
@@ -163,6 +155,21 @@ namespace AGAMOTTO.WinTAKMIL
                     if (double.IsNaN(alt)) alt = 0.0;
                 }
                 catch { /* some items may not expose Position */ }
+
+                bool nearExistingPoint = false;
+                foreach (var prev in sentPointLatLon)
+                {
+                    double dLat = (lat - prev.lat) * 111320.0;
+                    double dLon = (lon - prev.lon) * 111320.0 * Math.Cos(lat * Math.PI / 180.0);
+                    if (Math.Sqrt(dLat * dLat + dLon * dLon) < 40.0)
+                    {
+                        nearExistingPoint = true;
+                        break;
+                    }
+                }
+                if (nearExistingPoint)
+                    continue;
+                sentPointLatLon.Add((lat, lon));
 
                 var evt = new XElement("event",
                     new XAttribute("version", "2.0"),
@@ -315,13 +322,36 @@ namespace AGAMOTTO.WinTAKMIL
         }
 
         // CoT route builder (b-m-p-s-r + <detail><route>)
-        private static XElement BuildRouteEvent(
+        internal static XElement BuildRouteEvent(
             string uid, string name, DateTime timestamp,
-            List<(double lat, double lon, double? alt)> vertices)
+            List<(double lat, double lon, double? alt)> vertices,
+            int? colorArgb = null)
         {
             var first = vertices[0];
             string tNow = timestamp.ToString("o");
             string tStale = timestamp.AddMinutes(15).ToString("o");
+
+            var detail = new XElement("detail",
+                new XElement("contact", new XAttribute("callsign", name ?? "Route")),
+                new XElement("route",
+                    new XAttribute("name", name ?? "Route"),
+                    vertices.Select(v =>
+                    {
+                        var el = new XElement("point",
+                            new XAttribute("lat", v.lat.ToString(CultureInfo.InvariantCulture)),
+                            new XAttribute("lon", v.lon.ToString(CultureInfo.InvariantCulture))
+                        );
+                        if (v.alt.HasValue)
+                            el.Add(new XAttribute("hae", v.alt.Value.ToString(CultureInfo.InvariantCulture)));
+                        return el;
+                    })
+                ));
+
+            if (colorArgb.HasValue)
+            {
+                detail.Add(new XElement("color", new XAttribute("argb", colorArgb.Value.ToString(CultureInfo.InvariantCulture))));
+                detail.Add(new XElement("strokeColor", new XAttribute("value", colorArgb.Value.ToString(CultureInfo.InvariantCulture))));
+            }
 
             return new XElement("event",
                 new XAttribute("version", "2.0"),
@@ -331,7 +361,6 @@ namespace AGAMOTTO.WinTAKMIL
                 new XAttribute("time", tNow),
                 new XAttribute("start", tNow),
                 new XAttribute("stale", tStale),
-                // Anchor the route at the first vertex
                 new XElement("point",
                     new XAttribute("lat", first.lat.ToString(CultureInfo.InvariantCulture)),
                     new XAttribute("lon", first.lon.ToString(CultureInfo.InvariantCulture)),
@@ -339,24 +368,40 @@ namespace AGAMOTTO.WinTAKMIL
                     new XAttribute("ce", "9999999"),
                     new XAttribute("le", "9999999")
                 ),
-                new XElement("detail",
-                    new XElement("contact", new XAttribute("callsign", name ?? "Route")),
-                    new XElement("route",
-                        new XAttribute("name", name ?? "Route"),
-                        vertices.Select(v =>
-                        {
-                            var el = new XElement("point",
-                                new XAttribute("lat", v.lat.ToString(CultureInfo.InvariantCulture)),
-                                new XAttribute("lon", v.lon.ToString(CultureInfo.InvariantCulture))
-                            );
-                            if (v.alt.HasValue)
-                                el.Add(new XAttribute("hae", v.alt.Value.ToString(CultureInfo.InvariantCulture)));
-                            return el;
-                        })
-                    )
-                )
-            );
+                detail);
         }
+
+        /// <summary>Blue policy route overlay for post-training inference (ARGB 0xFF0000FF).</summary>
+        public static XDocument BuildBluePolicyRouteDocument(
+            string routeUid,
+            string routeName,
+            IList<(double lat, double lon, double? alt)> vertices)
+        {
+            if (vertices == null || vertices.Count < 2)
+                return null;
+            var list = new List<(double, double, double?)>(vertices.Count);
+            foreach (var v in vertices)
+                list.Add(v);
+            var evt = BuildRouteEvent(routeUid, routeName, DateTime.UtcNow, list, colorArgb: unchecked((int)0xFF0000FF));
+            return new XDocument(evt);
+        }
+
+        public bool TryImportBluePolicyRoute(
+            string routeUid,
+            string routeName,
+            IList<(double lat, double lon, double? alt)> vertices)
+        {
+            var doc = BuildBluePolicyRouteDocument(routeUid, routeName, vertices);
+            if (doc == null)
+                return false;
+            return CotMapImporter.TryImportCotXml(doc.ToString());
+        }
+
+        // Legacy overload used by map export
+        private static XElement BuildRouteEvent(
+            string uid, string name, DateTime timestamp,
+            List<(double lat, double lon, double? alt)> vertices)
+            => BuildRouteEvent(uid, name, timestamp, vertices, null);
 
         // Build coords from discovered points
         private static List<(double lat, double lon, double? alt)> ExtractLatLonList(System.Collections.IEnumerable seq)
@@ -471,64 +516,6 @@ namespace AGAMOTTO.WinTAKMIL
             var invalid = Path.GetInvalidFileNameChars();
             var filtered = new string(s.Where(c => !invalid.Contains(c)).ToArray());
             return filtered.Length > maxLen ? filtered.Substring(0, maxLen) : filtered;
-        }
-
-        sealed class FriendlyAnchor
-        {
-            public string Callsign;
-            public double Lat;
-            public double Lon;
-        }
-
-        static List<FriendlyAnchor> CollectFriendlyAnchors(IEnumerable<MapObjectItem> nodes)
-        {
-            var anchors = new List<FriendlyAnchor>();
-            foreach (var node in nodes)
-            {
-                if (node?.MapItem == null) continue;
-                var mapItem = node.MapItem;
-                var type = mapItem.GetCotType() ?? GetCotTypeFallback(mapItem);
-                if (string.IsNullOrWhiteSpace(type) || !type.StartsWith("a-f", StringComparison.OrdinalIgnoreCase))
-                    continue;
-                if (type.EndsWith("-r", StringComparison.OrdinalIgnoreCase))
-                    continue;
-
-                double lat = 0, lon = 0;
-                try
-                {
-                    lat = node.Position?.Latitude ?? 0.0;
-                    lon = node.Position?.Longitude ?? 0.0;
-                }
-                catch { continue; }
-
-                var callsign = mapItem.Name;
-                if (string.IsNullOrWhiteSpace(callsign))
-                    callsign = mapItem.Uid ?? "friendly";
-                anchors.Add(new FriendlyAnchor { Callsign = callsign, Lat = lat, Lon = lon });
-            }
-            return anchors;
-        }
-
-        static string MatchNearestFriendlyCallsign(
-            (double lat, double lon, double? alt) routeStart,
-            List<FriendlyAnchor> anchors)
-        {
-            if (anchors == null || anchors.Count == 0)
-                return null;
-            FriendlyAnchor best = null;
-            double bestScore = double.MaxValue;
-            foreach (var anchor in anchors)
-            {
-                double dLat = anchor.Lat - routeStart.lat;
-                double dLon = anchor.Lon - routeStart.lon;
-                double score = dLat * dLat + dLon * dLon;
-                if (score < bestScore)
-                {
-                    bestScore = score;
-                    best = anchor;
-                }
-            }
-            return best?.Callsign;
         }
 
         public static void Mode(XDocument doc, DispatchMode mode, string mission)

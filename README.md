@@ -9,9 +9,9 @@
 | Area | What it does |
 |------|----------------|
 | **Unity simulation** (`AGAMOTTO/AGAMOTTO Simulation`) | Primary environment: RIDE-based entities, terrain, scenarios, and RL agents (Attack-to-Destroy / `AGAMOTTO_RL`). |
-| **WinTAK plugin** (`AGAMOTTO-WinTAKMIL-Plugin`) | C# plugin for WinTAK MIL — Training, Evaluation, and **Hybrid** (AWAC) dispatch modes. |
+| **WinTAK plugin** (`AGAMOTTO-WinTAKMIL-Plugin`) | C# plugin for WinTAK MIL — **Evaluation** (spawn) and **SAC** (training) dispatch. |
 | **Shared WinTAK / MIL glue** (`AGAMOTTO/WinTAKMIL`) | Supporting C# helpers used with WinTAK-oriented features. |
-| **Python server** (`AGAMOTTO/AGAMOTTO Server`) | CoT orchestration, Unity_Data replay, SAC via `mlagents-learn`, and custom **hybrid AWAC** trainer. |
+| **Python server** (`AGAMOTTO/AGAMOTTO Server`) | Optional SAC trainer (`agamotto_sac_train.py`). CoT no longer goes through a Python orchestrator. |
 
 The **RIDE** simulation SDK content (`Assets/Ride`, `Ride_Art`, `Ride_Dependencies`) is **not stored in this repository** (see `.gitignore`). Install it locally per the simulation setup guide.
 
@@ -22,43 +22,42 @@ The **RIDE** simulation SDK content (`Assets/Ride`, `Ride_Art`, `Ride_Dependenci
 - **Unity Hub** + **Unity 2022.3 LTS** (project pinned to **2022.3.62f3**).
 - **Visual Studio 2022** (or compatible MSBuild) for the WinTAK plugin.
 - **WinTAK MIL** (optional) for map-based C2 dispatch.
-- **Python 3.10+** with **ML-Agents** (`mlagents-learn`) and **PyTorch** for hybrid AWAC.
+- **Python 3.10+** with **ML-Agents** (`mlagents-learn`) if you run SAC training.
 
 ---
 
 ## Quick start
 
-### CoT orchestrator (Training / Evaluation)
+### Send tactical data into Unity (no orchestrator)
+
+Unity listens for CoT on **TCP 65432** after you press Play. Do **not** start `AGAMOTTO Orchestrator.py`.
+
+1. Open `AGAMOTTO Simulation` → `Assets/Scenes/BaseScene` → **Play**.
+2. Wait until terrain is **Valid** (Unity log: `AGAMOTTO_CotTcpListener: listening on 0.0.0.0:65432`).
+3. In WinTAK: IP `127.0.0.1` (or the Unity machine), Port **65432**.
+4. Place friendly / hostile / optional route → **Evaluation** or **SAC** → **Send Map Data to Listener**.
+
+CoT with no `mode` (typical ATAK) spawns as Evaluation.
+
+Without WinTAK, after Unity is playing:
 
 ```powershell
 cd "AGAMOTTO\AGAMOTTO Server"
-python "AGAMOTTO Orchestrator.py"
-```
-
-WinTAK: match CoT port (`65432` default). Without WinTAK:
-
-```powershell
 python "AGAMOTTO Orchestrator.py" --replay-unity-data
 ```
 
-### Hybrid AWAC (route as expert demonstration)
+### SAC training (optional)
 
-1. WinTAK **Hybrid** mode → friendly unit + leader route → Send.
-2. Start the AWAC trainer, then press **Play** in Unity.
+Start Unity Play first (CoT listener + Academy), then:
 
 ```powershell
 cd "AGAMOTTO\AGAMOTTO Server"
-pip install -r requirements-awac.txt
-
-python agamotto_awac_train.py configs/hybrid_awac.yaml `
-  --run-id=hybrid_awac --results-dir=results --behavior-name=AGAMOTTO_RL `
-  --base-port=5004 --timeout-wait=5000 --time-scale=50 `
-  --expert-wait-s=900 --expert-min-transitions=32
+python agamotto_sac_train.py --run-id=sac_run --timeout-wait=5000 --time-scale=50 --force
 ```
 
-Unity records the expert trajectory to `StreamingAssets/awac/expert_buffer.jsonl` during the baseline phase; Python uses it for offline AWAC updates.
+Then WinTAK **SAC** → Send Map Data.
 
-Full workflow, `active_run.json`, and SAC commands: **[`AGAMOTTO/AGAMOTTO Server/README.md`](AGAMOTTO/AGAMOTTO%20Server/README.md)**
+Full notes: **[`AGAMOTTO/AGAMOTTO Server/README.md`](AGAMOTTO/AGAMOTTO%20Server/README.md)**
 
 ---
 
@@ -76,7 +75,7 @@ Full workflow, `active_run.json`, and SAC commands: **[`AGAMOTTO/AGAMOTTO Server
 1. [`AGAMOTTO-WinTAKMIL-Plugin/README.md`](AGAMOTTO-WinTAKMIL-Plugin/README.md)
 2. Build in Visual Studio 2022 and deploy to WinTAK MIL plugins.
 
-Hybrid mode sends `mode=Hybrid` on CoT and links route callsigns to friendly entities.
+The plugin sends length-prefixed CoT XML to Unity's Play-mode listener (default `127.0.0.1:65432`).
 
 ---
 
@@ -85,7 +84,7 @@ Hybrid mode sends `mode=Hybrid` on CoT and links route callsigns to friendly ent
 ```text
 AGAMOTTO/
 ├── AGAMOTTO Simulation/       # Unity + RIDE
-├── AGAMOTTO Server/           # Orchestrator, AWAC trainer, configs
+├── AGAMOTTO Server/           # SAC trainer, causal fitter, configs
 └── WinTAKMIL/
 
 AGAMOTTO-WinTAKMIL-Plugin/     # WinTAK MIL plugin

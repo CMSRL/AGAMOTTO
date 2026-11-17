@@ -3,13 +3,17 @@ using Ride.AI;
 using Ride.AI.RL;
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
+using System.Reflection;
 using System.Threading.Tasks;
 using Unity.MLAgents.Policies;
 using UnityEngine;
 
 public class AGAMOTTO_RL_Behavior : MLBehaviour
 {
+    static int s_initGeneration;
+    int _initGeneration;
     /// <summary>
     /// Max distance from the learning agent when querying candidate enemies (world units).
     /// </summary>
@@ -58,10 +62,25 @@ public class AGAMOTTO_RL_Behavior : MLBehaviour
 
     async protected override void InitMLBehaviour()
     {
+        int generation = ++s_initGeneration;
+        _initGeneration = generation;
         try
         {
             base.InitMLBehaviour();
+            if (_initGeneration != generation)
+                return;
+
             AGAMOTTO_ATD_Agent mlagent = GetRLAgent<AGAMOTTO_ATD_Agent>();
+            if (mlagent == null)
+            {
+                Debug.LogError(
+                    "AGAMOTTO_RL_Behavior: AGAMOTTO_ATD_Agent not found on mission settings prefab "
+                    + "(AttackToDestroy). RL is attached via SetAgentBehaviour, not the infantry prefab.");
+                return;
+            }
+
+            BehaviorParameters bp = mlagent.gameObject.GetComponent<BehaviorParameters>();
+
             Team leaderTeam = api.agentSystem.GetAgentTeam(entity);
             if (leaderTeam != Team.Blue)
             {
@@ -74,7 +93,6 @@ public class AGAMOTTO_RL_Behavior : MLBehaviour
             // Ensure RIDE id + Unity transform track the behaviour entity (squad leader), not the mission prefab root.
             mlagent.Init(api, entity);
             AGAMOTTO_EvaluationRunConfig.TryApplyToAgent(mlagent);
-            BehaviorParameters bp = mlagent.gameObject.GetComponent<BehaviorParameters>();
             bp.BehaviorName = "AGAMOTTO_RL";
             // Two squads → two ML-Agents teams for cooperative multi-squad training (same behavior name, shared policy file).
             bp.TeamId = s_nextMlAgentsTeamId & 1;
@@ -83,6 +101,8 @@ public class AGAMOTTO_RL_Behavior : MLBehaviour
             mlagent.m_squadTacticalGroup = _friendlyTacticalGroup;
 
             bool enemiesReady = await WaitUntilEnemySpawn(mlagent);
+            if (_initGeneration != generation)
+                return;
             if (!enemiesReady)
             {
                 Debug.LogError("AGAMOTTO_RL_Behavior: Timed out waiting for an enemy. Agent enemy target was not set.");
@@ -90,7 +110,8 @@ public class AGAMOTTO_RL_Behavior : MLBehaviour
             }
 
             // Snapshot start pose from sim (leader entity), not the mission prefab transform.
-            mlagent.m_startingPosition = api.GetSystem<ITransformSystem>().GetPosition(entity);
+            if (AGAMOTTO_ATD_Agent.TryGetRidePosition(entity, out RideVector3 startPos))
+                mlagent.m_startingPosition = startPos;
 
             Team team = api.agentSystem.GetAgentTeam(entity) == Team.Blue ? Team.Red : Team.Blue;
             IEnumerable<RideID> enemies = api.scenarioSystem.GetAgents(mlagent.agentTransform.position, maxEnemyDistance, team);
@@ -101,11 +122,19 @@ public class AGAMOTTO_RL_Behavior : MLBehaviour
             if (delayedSpawnSnapshotMs > 0)
             {
                 await Task.Delay(delayedSpawnSnapshotMs);
+                if (_initGeneration != generation)
+                    return;
                 CaptureAndMergeSpawnSnapshots(mlagent);
             }
 
+            if (_initGeneration != generation)
+                return;
+
             mlagent.TryLockEpisodeSpawnAnchors();
+
+            TryEnableInferenceMode(mlagent, bp);
             mlagent.EnableRlCombatEngagement();
+
             Debug.Log(
                 $"AGAMOTTO_RL_Behavior: RL ready — teleport={!mlagent.useSquadNavMeshPaths}, "
                 + $"combat=Auto_Attack+Acquire_Targets.");
@@ -118,17 +147,163 @@ public class AGAMOTTO_RL_Behavior : MLBehaviour
 
     void CaptureAndReplaceSpawnSnapshots(AGAMOTTO_ATD_Agent mlagent)
     {
-        List<RideID> friendlies = CollectSquadAgentsNear(entity, Team.Blue, friendlySquadSpawnCaptureRadiusM);
+        List<RideID> friendlies = CollectFriendlySquadForSnapshots();
         List<RideID> hostiles = CollectEnemySquadNearAnchor(mlagent, Team.Red, enemySquadSpawnCaptureRadiusM);
         mlagent.ReplaceEpisodeSpawnSnapshots(friendlies, hostiles);
+        Debug.Log(
+            $"AGAMOTTO_RL_Behavior: spawn snapshot replace — {friendlies.Count} friendlies, {hostiles.Count} hostiles.");
     }
 
     void CaptureAndMergeSpawnSnapshots(AGAMOTTO_ATD_Agent mlagent)
     {
-        List<RideID> friendlies = CollectSquadAgentsNear(entity, Team.Blue, friendlySquadSpawnCaptureRadiusM);
+        List<RideID> friendlies = CollectFriendlySquadForSnapshots();
         List<RideID> hostiles = CollectEnemySquadNearAnchor(mlagent, Team.Red, enemySquadSpawnCaptureRadiusM);
         mlagent.SetEpisodeSpawnSnapshots(friendlies, hostiles);
         mlagent.TryLockEpisodeSpawnAnchors();
+        Debug.Log(
+            $"AGAMOTTO_RL_Behavior: spawn snapshot merge — {friendlies.Count} friendlies, {hostiles.Count} hostiles.");
+    }
+
+    /// <summary>Prefer tactical-group roster (full 2×2 squad); fall back to spatial query near leader.</summary>
+    List<RideID> CollectFriendlySquadForSnapshots()
+    {
+        List<RideID> fromGroup = CollectAgentsInTacticalGroup(_friendlyTacticalGroup);
+        if (fromGroup.Count >= 1)
+            return fromGroup;
+        List<RideID> spatial = CollectSquadAgentsNear(entity, Team.Blue, Mathf.Min(friendlySquadSpawnCaptureRadiusM, 80f));
+        return spatial.Count > fromGroup.Count ? spatial : fromGroup;
+    }
+
+    /// <summary>Enumerate soldiers in a RIDE tactical group (CreateSquad / CreateFireTeam handle).</summary>
+    List<RideID> CollectAgentsInTacticalGroup(RideID tacticalGroup)
+    {
+        var result = new List<RideID>();
+        if (!AGAMOTTO_ATD_Agent.IsValidRideId(tacticalGroup))
+            return result;
+
+        var gs = api.groupSystem;
+        if (gs == null)
+            return result;
+
+        var seen = new HashSet<int>();
+        void TryAdd(RideID id)
+        {
+            if (!AGAMOTTO_ATD_Agent.IsValidRideId(id) || !seen.Add(id.id))
+                return;
+            result.Add(id);
+        }
+
+        foreach (string methodName in new[]
+        {
+            "GetGroupMembers",
+            "GetAgentsInGroup",
+            "GetGroupAgents",
+            "EnumerateGroupMembers",
+            "GetMembers",
+        })
+        {
+            try
+            {
+                MethodInfo method = gs.GetType().GetMethod(
+                    methodName,
+                    BindingFlags.Public | BindingFlags.Instance,
+                    null,
+                    new[] { typeof(RideID) },
+                    null);
+                if (method == null)
+                    continue;
+                if (method.Invoke(gs, new object[] { tacticalGroup }) is IEnumerable<RideID> ids)
+                {
+                    foreach (RideID id in ids)
+                        TryAdd(id);
+                }
+            }
+            catch
+            {
+                /* optional API */
+            }
+        }
+
+        RideID leader = gs.GetGroupLeader(tacticalGroup);
+        TryAdd(leader);
+        TryAdd(entity);
+
+        if (result.Count < 2)
+        {
+            foreach (RideID id in CollectAgentsSharingTacticalGroup(tacticalGroup))
+                TryAdd(id);
+        }
+
+        return result;
+    }
+
+    /// <summary>All team agents whose tactical group matches <paramref name="tacticalGroup"/>.</summary>
+    List<RideID> CollectAgentsSharingTacticalGroup(RideID tacticalGroup)
+    {
+        var result = new List<RideID>();
+        if (!AGAMOTTO_ATD_Agent.IsValidRideId(tacticalGroup))
+            return result;
+
+        var gs = api.groupSystem;
+        if (gs == null)
+            return result;
+
+        var seen = new HashSet<int>();
+        void TryAdd(RideID id)
+        {
+            if (!AGAMOTTO_ATD_Agent.IsValidRideId(id) || !seen.Add(id.id))
+                return;
+            result.Add(id);
+        }
+
+        IEnumerable<RideID> blues = api.scenarioSystem.GetAgents(Team.Blue);
+        if (blues == null)
+            return result;
+
+        foreach (RideID id in blues)
+        {
+            RideID group = TryResolveAgentTacticalGroup(gs, id);
+            if (group.id == tacticalGroup.id)
+                TryAdd(id);
+        }
+
+        return result;
+    }
+
+    static RideID TryResolveAgentTacticalGroup(object groupSystem, RideID agentId)
+    {
+        if (groupSystem == null || !AGAMOTTO_ATD_Agent.IsValidRideId(agentId))
+            return default;
+
+        foreach (string methodName in new[]
+        {
+            "GetAgentGroup",
+            "GetGroupForAgent",
+            "GetAgentsGroup",
+            "GetTacticalGroup",
+        })
+        {
+            try
+            {
+                MethodInfo method = groupSystem.GetType().GetMethod(
+                    methodName,
+                    BindingFlags.Public | BindingFlags.Instance,
+                    null,
+                    new[] { typeof(RideID) },
+                    null);
+                if (method == null)
+                    continue;
+                if (method.Invoke(groupSystem, new object[] { agentId }) is RideID group
+                    && AGAMOTTO_ATD_Agent.IsValidRideId(group))
+                    return group;
+            }
+            catch
+            {
+                /* optional API */
+            }
+        }
+
+        return default;
     }
 
     /// <summary>
@@ -136,9 +311,9 @@ public class AGAMOTTO_RL_Behavior : MLBehaviour
     /// </summary>
     List<RideID> CollectSquadAgentsNear(RideID leaderEntity, Team team, float horizontalRadiusM)
     {
-        ITransformSystem ts = api.GetSystem<ITransformSystem>();
         var ss = api.scenarioSystem;
-        RideVector3 anchorRv = ts.GetPosition(leaderEntity);
+        if (!AGAMOTTO_ATD_Agent.TryGetRidePosition(leaderEntity, out RideVector3 anchorRv))
+            return new List<RideID>();
         var anchor = new Vector3((float)anchorRv.x, (float)anchorRv.y, (float)anchorRv.z);
         float r2 = horizontalRadiusM * horizontalRadiusM;
 
@@ -149,7 +324,8 @@ public class AGAMOTTO_RL_Behavior : MLBehaviour
         {
             if (!AGAMOTTO_ATD_Agent.IsValidRideId(id) || !seen.Add(id.id))
                 return;
-            RideVector3 p = ts.GetPosition(id);
+            if (!AGAMOTTO_ATD_Agent.TryGetRidePosition(id, out RideVector3 p))
+                return;
             float hdx = (float)(p.x - anchorRv.x);
             float hdz = (float)(p.z - anchorRv.z);
             if (hdx * hdx + hdz * hdz > r2)
@@ -183,13 +359,11 @@ public class AGAMOTTO_RL_Behavior : MLBehaviour
     /// </summary>
     List<RideID> CollectEnemySquadNearAnchor(AGAMOTTO_ATD_Agent mlagent, Team team, float horizontalRadiusM)
     {
-        ITransformSystem ts = api.GetSystem<ITransformSystem>();
         var ss = api.scenarioSystem;
 
-        if (!AGAMOTTO_ATD_Agent.IsValidRideId(mlagent.m_enemy))
+        if (!AGAMOTTO_ATD_Agent.TryGetRidePosition(mlagent.m_enemy, out RideVector3 anchorRv))
             return ToDedupedList(ss.GetAgents(team));
 
-        RideVector3 anchorRv = ts.GetPosition(mlagent.m_enemy);
         var anchor = new Vector3((float)anchorRv.x, (float)anchorRv.y, (float)anchorRv.z);
         float r2 = horizontalRadiusM * horizontalRadiusM;
 
@@ -200,7 +374,8 @@ public class AGAMOTTO_RL_Behavior : MLBehaviour
         {
             if (!AGAMOTTO_ATD_Agent.IsValidRideId(id) || !seen.Add((id.id, id.version)))
                 return;
-            RideVector3 p = ts.GetPosition(id);
+            if (!AGAMOTTO_ATD_Agent.TryGetRidePosition(id, out RideVector3 p))
+                return;
             float hdx = (float)(p.x - anchorRv.x);
             float hdz = (float)(p.z - anchorRv.z);
             if (hdx * hdx + hdz * hdz > r2)
@@ -275,6 +450,36 @@ public class AGAMOTTO_RL_Behavior : MLBehaviour
         mlagent.m_enemy = bestId;
         mlagent.m_enemyStartingPosition = bestPos;
         return true;
+    }
+
+    void TryEnableInferenceMode(AGAMOTTO_ATD_Agent mlagent, BehaviorParameters bp)
+    {
+        if (!AGAMOTTO_EvaluationRunConfig.IsInferencePhase())
+            return;
+
+        string trainer = AGAMOTTO_EvaluationRunConfig.GetTrainerType();
+        if (AGAMOTTO_EvaluationRunConfig.PythonDrivesInference())
+        {
+            Debug.Log(
+                $"AGAMOTTO_RL_Behavior: {trainer.ToUpperInvariant()} post-training inference — "
+                + "Python drives actions; Unity records route for WinTAK.");
+            return;
+        }
+
+        string rel = AGAMOTTO_EvaluationRunConfig.GetInferencePolicyRelativePath();
+        string onnxPath = Path.Combine(Application.streamingAssetsPath, rel.Replace('\\', '/'));
+        if (!File.Exists(onnxPath))
+        {
+            Debug.LogWarning(
+                $"AGAMOTTO_RL_Behavior: inference ONNX not found at {onnxPath}. "
+                + "Copy exported AGAMOTTO_RL.onnx into StreamingAssets/policies/.");
+            return;
+        }
+
+        bp.BehaviorType = BehaviorType.InferenceOnly;
+        Debug.Log(
+            $"AGAMOTTO_RL_Behavior: inference mode enabled. "
+            + $"Assign ONNX model from {onnxPath} to BehaviorParameters if not already set.");
     }
 
     /// <summary>

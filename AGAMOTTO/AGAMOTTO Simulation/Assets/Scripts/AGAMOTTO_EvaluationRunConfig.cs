@@ -1,10 +1,10 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using UnityEngine;
 
 /// <summary>
-/// Optional per-run overrides written by the Python evaluation suite to
-/// StreamingAssets/evaluation/active_run.json before training starts.
+/// Optional per-run overrides written to StreamingAssets/evaluation/active_run.json.
 /// </summary>
 public static class AGAMOTTO_EvaluationRunConfig
 {
@@ -13,29 +13,29 @@ public static class AGAMOTTO_EvaluationRunConfig
     {
         public int version = 1;
         public string runId;
+        public string phase = "training";
+        public string trainerType = "sac";
         public bool sendTrainingFeedbackToTak = true;
         public float rewardPerEnemySquadMemberKilled = float.NaN;
         public float penaltyPerFriendlyWingmanDeath = float.NaN;
-        /// <summary>false = teleport squad per RL step (reliable in eval); true = NavMesh MoveGroupPath.</summary>
         public bool useSquadNavMeshPaths = false;
         public float squadMaxMemberSpacingM = 20f;
         public string dispatchMode = "Training";
         public int trainingFriendlyLimit = 1;
-        /// <summary>When true, hybrid AWAC uses leader route as expert baseline before online training.</summary>
-        public bool awacEnabled = false;
-        /// <summary>AWAC temperature λ (advantage weighting); matches paper notation.</summary>
-        public float awacLambda = 1.0f;
-        /// <summary>Max decision steps in expert-baseline phase per episode before switching to online AWAC.</summary>
-        public int expertPhaseMaxSteps = 2000;
-        /// <summary>Fraction of online steps that blend toward expert action (0 = off, 1 = full expert).</summary>
-        public float expertBlendDuringOnline = 0.0f;
-        public string expertTrajectoryPath = "";
+        public bool inferenceEnabled = false;
+        public bool pythonDrivesInference = false;
+        public string inferencePolicyPath = "policies/AGAMOTTO_RL.onnx";
+        public string leaderCallsign = "leader";
+        public int inferenceRouteSampleSteps = 8;
     }
 
     static ActiveRunJson _cached;
-
     static bool _loaded;
     static int _rlSlotsClaimed;
+    static bool _respawnReattachBypass;
+
+    public static void BeginRespawnReattach() => _respawnReattachBypass = true;
+    public static void EndRespawnReattach() => _respawnReattachBypass = false;
 
     static string ActiveRunPath =>
         Path.Combine(Application.streamingAssetsPath, "evaluation", "active_run.json");
@@ -48,9 +48,10 @@ public static class AGAMOTTO_EvaluationRunConfig
         _rlSlotsClaimed = 0;
     }
 
-    /// <summary>Only friendly squad leaders may claim an RL policy slot (hostiles never train).</summary>
     public static bool TryClaimRlTrainingSlot()
     {
+        if (_respawnReattachBypass)
+            return true;
         EnsureLoaded();
         string path = ActiveRunPath;
         if (!File.Exists(path))
@@ -91,34 +92,114 @@ public static class AGAMOTTO_EvaluationRunConfig
         }
     }
 
+    public static void InvalidateCache()
+    {
+        _cached = null;
+    }
+
     public static string GetDispatchMode()
     {
         var cfg = LoadConfig();
-        return string.IsNullOrEmpty(cfg?.dispatchMode) ? "Training" : cfg.dispatchMode;
+        string mode = string.IsNullOrEmpty(cfg?.dispatchMode) ? "Training" : cfg.dispatchMode;
+        if (string.Equals(mode, "Hybrid", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(mode, "AWAC", StringComparison.OrdinalIgnoreCase))
+            return "Training";
+        return mode;
     }
 
-    public static bool IsAwacHybridEnabled()
+    /// <summary>
+    /// Overwrite leftover run files so SAC from WinTAK attaches as Training.
+    /// </summary>
+    public static void WriteSacTrainingRun()
+    {
+        var cfg = new ActiveRunJson
+        {
+            version = 1,
+            runId = "sac",
+            phase = "training",
+            trainerType = "sac",
+            dispatchMode = "Training",
+            sendTrainingFeedbackToTak = true,
+            inferenceEnabled = false,
+            pythonDrivesInference = false,
+            trainingFriendlyLimit = 1,
+        };
+        try
+        {
+            string dir = Path.GetDirectoryName(ActiveRunPath);
+            if (!string.IsNullOrEmpty(dir))
+                Directory.CreateDirectory(dir);
+            File.WriteAllText(ActiveRunPath, JsonUtility.ToJson(cfg, true));
+            _cached = cfg;
+            _loaded = true;
+            Debug.Log("AGAMOTTO_EvaluationRunConfig: wrote SAC training active_run.json");
+        }
+        catch (Exception ex)
+        {
+            Debug.LogWarning($"AGAMOTTO_EvaluationRunConfig: could not write SAC active_run: {ex.Message}");
+            _cached = cfg;
+            _loaded = true;
+        }
+    }
+
+    public static bool IsInferencePhase()
     {
         var cfg = LoadConfig();
         if (cfg == null)
             return false;
-        return cfg.awacEnabled
-            || string.Equals(cfg.dispatchMode, "Hybrid", StringComparison.OrdinalIgnoreCase);
+        return cfg.inferenceEnabled
+            || string.Equals(cfg.phase, "inference", StringComparison.OrdinalIgnoreCase);
+    }
+
+    public static bool PythonDrivesInference()
+    {
+        var cfg = LoadConfig();
+        return cfg != null && cfg.pythonDrivesInference;
+    }
+
+    public static string GetTrainerType()
+    {
+        var cfg = LoadConfig();
+        return string.IsNullOrEmpty(cfg?.trainerType) ? "sac" : cfg.trainerType;
+    }
+
+    public static string GetRunId()
+    {
+        var cfg = LoadConfig();
+        return string.IsNullOrEmpty(cfg?.runId) ? "inference" : cfg.runId;
+    }
+
+    public static string GetInferencePolicyRelativePath()
+    {
+        var cfg = LoadConfig();
+        return string.IsNullOrEmpty(cfg?.inferencePolicyPath)
+            ? "policies/AGAMOTTO_RL.onnx"
+            : cfg.inferencePolicyPath;
+    }
+
+    public static string GetLeaderCallsign()
+    {
+        var cfg = LoadConfig();
+        return string.IsNullOrEmpty(cfg?.leaderCallsign) ? "leader" : cfg.leaderCallsign;
+    }
+
+    public static int GetInferenceRouteSampleSteps()
+    {
+        var cfg = LoadConfig();
+        return cfg != null && cfg.inferenceRouteSampleSteps > 0 ? cfg.inferenceRouteSampleSteps : 8;
     }
 
     public static void TryApplyToAgent(AGAMOTTO_ATD_Agent agent)
     {
         if (agent == null) return;
         var cfg = LoadConfig();
-        bool hybridDispatch = AGAMOTTO_HybridAwacHub.IsHybridDispatch
-            || string.Equals(cfg?.dispatchMode, "Hybrid", StringComparison.OrdinalIgnoreCase);
 
         if (cfg != null)
         {
             try
             {
                 if (!string.IsNullOrEmpty(cfg.runId))
-                    Debug.Log($"AGAMOTTO_EvaluationRunConfig: active run '{cfg.runId}'");
+                    Debug.Log($"AGAMOTTO_EvaluationRunConfig: active run '{cfg.runId}' phase={cfg.phase}");
 
                 agent.sendTrainingFeedbackToTak = cfg.sendTrainingFeedbackToTak;
 
@@ -129,6 +210,15 @@ public static class AGAMOTTO_EvaluationRunConfig
                 agent.useSquadNavMeshPaths = cfg.useSquadNavMeshPaths;
                 if (cfg.squadMaxMemberSpacingM > 0f)
                     agent.squadMaxMemberSpacingM = cfg.squadMaxMemberSpacingM;
+
+                if (IsInferencePhase())
+                {
+                    agent.ConfigureInferenceRun(
+                        cfg.trainerType,
+                        cfg.runId,
+                        cfg.leaderCallsign,
+                        cfg.inferenceRouteSampleSteps);
+                }
             }
             catch (Exception ex)
             {
@@ -136,16 +226,5 @@ public static class AGAMOTTO_EvaluationRunConfig
             }
         }
 
-        if (cfg != null || hybridDispatch)
-        {
-            agent.ApplyAwacRunConfig(
-                cfg?.awacEnabled ?? hybridDispatch,
-                cfg != null && cfg.awacLambda > 0f ? cfg.awacLambda : 1f,
-                cfg != null && cfg.expertPhaseMaxSteps > 0 ? cfg.expertPhaseMaxSteps : 2000,
-                cfg != null ? cfg.expertBlendDuringOnline : 0f,
-                cfg?.expertTrajectoryPath ?? "",
-                cfg?.runId ?? "hybrid_awac",
-                hybridDispatch);
-        }
     }
 }

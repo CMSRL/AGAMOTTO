@@ -62,8 +62,6 @@ namespace AGAMOTTO_WinTAK_Plugin
         public ICommand SetEvaluationModeCommand { get; private set; }
         public ICommand SetTrainingModeCommand { get; private set; }
 
-        public ICommand SetHybridModeCommand { get; private set; }
-
         public ICommand SetATDModeCommand { get; private set; }
 
         public ICommand SetRTDModeCommand { get; private set; }
@@ -96,12 +94,8 @@ namespace AGAMOTTO_WinTAK_Plugin
             SetEvaluationModeCommand = setEvalCmd;
             
             var setTrainCmd = new ExecutedCommand();
-            setTrainCmd.Executed += (_, __) => { _orchestrator.CurrentMode = AGAMOTTO.WinTAKMIL.DispatchMode.Training; LogLines.Add($"[{DateTime.Now:T}] Mode set: training"); };
+            setTrainCmd.Executed += (_, __) => { _orchestrator.CurrentMode = AGAMOTTO.WinTAKMIL.DispatchMode.Training; LogLines.Add($"[{DateTime.Now:T}] Mode set: SAC"); };
             SetTrainingModeCommand = setTrainCmd;
-
-            var setHybridCmd = new ExecutedCommand();
-            setHybridCmd.Executed += (_, __) => { _orchestrator.CurrentMode = AGAMOTTO.WinTAKMIL.DispatchMode.Hybrid; LogLines.Add($"[{DateTime.Now:T}] Mode set: hybrid"); };
-            SetHybridModeCommand = setHybridCmd;
 
             var setATDCmd = new ExecutedCommand();
             setATDCmd.Executed += (_, __) => { _orchestrator.CurrentMission = "Attack to Destroy"; LogLines.Add($"[{DateTime.Now:T}] Mission set: {_orchestrator.CurrentMission}"); };
@@ -391,9 +385,33 @@ namespace AGAMOTTO_WinTAK_Plugin
                     }
 
                     var payload = System.Text.Encoding.UTF8.GetString(buf, 0, got);
-                    AppendAssessment(payload);
+                    HandleAssessmentPayload(payload);
                 }
             }
+        }
+
+        void HandleAssessmentPayload(string payload)
+        {
+            if (TrainingFeedbackFormatter.TryParseInferenceRoute(payload, out var route))
+            {
+                PostToUi(() =>
+                {
+                    AssessmentLines.Add($"[{DateTime.Now:T}] {route.DisplayLine}");
+                    bool imported = _orchestrator.TryImportBluePolicyRoute(route.RouteUid, route.RouteName, route.Vertices);
+                    if (imported)
+                    {
+                        LogLines.Add($"[{DateTime.Now:T}] Blue policy route added to map ({route.Vertices.Count} pts).");
+                        RefreshCounts();
+                    }
+                    else
+                    {
+                        LogLines.Add($"[{DateTime.Now:T}] Policy route received ({route.Vertices.Count} pts) — map import unavailable; see Assessment.");
+                    }
+                });
+                return;
+            }
+
+            AppendAssessment(payload);
         }
 
         private void StopResultsListener()
