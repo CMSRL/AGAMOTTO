@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Fit the v1 terrain SCM from AGAMOTTO_CausalRecorder JSONL.
 
-Expects kind-typed rows: trial_begin, agent, dyad, shot, death, trial_end.
+Expects kind-typed rows: trial_begin, agent, group, dyad, shot, death, trial_end.
 
 Examples:
   python fit_graph.py path/to/causal_YYYYMMDD_HHMMSS.jsonl
@@ -66,6 +66,12 @@ TRIAL_KEYS = (
     "enemy_killed",
     "first_shot",
     "hit_rate",
+    "spacing_mean",
+    "frontage",
+    "depth",
+    "min_centroid_dist",
+    "first_terrain_los_t",
+    "first_in_range_t",
 )
 
 
@@ -108,8 +114,10 @@ def trials_from_records(records: Sequence[Dict[str, Any]]) -> List[Dict[str, Any
         begin = _first(members, "trial_begin")
         end = _first(members, "trial_end")
         agents = [m for m in members if _kind(m) == "agent"]
+        groups = [m for m in members if _kind(m) == "group"]
         dyads = [m for m in members if _kind(m) == "dyad"]
         blue_agents = [a for a in agents if as_bool01(a.get("blue")) == 1.0]
+        blue_groups = [g for g in groups if as_bool01(g.get("blue")) == 1.0]
         blue_dyads = [d for d in dyads if as_bool01(d.get("a_blue")) == 1.0]
         if not blue_dyads:
             blue_dyads = dyads
@@ -151,6 +159,8 @@ def trials_from_records(records: Sequence[Dict[str, Any]]) -> List[Dict[str, Any
         terrain_los = _mean_key(blue_dyads, "terrain_los")
         mobility = _mean_key(blue_agents, "disp_rate")
         if mobility is None:
+            mobility = _mean_key(blue_groups, "disp_rate")
+        if mobility is None:
             mobility = _mean_key(blue_agents, "speed")
 
         trials.append(
@@ -158,6 +168,7 @@ def trials_from_records(records: Sequence[Dict[str, Any]]) -> List[Dict[str, Any
                 "trial": tid,
                 "assignment": begin.get("assignment"),
                 "movement": begin.get("movement"),
+                "formation": begin.get("formation"),
                 "seed": begin.get("seed"),
                 "outcome": outcome or None,
                 "init_height_adv": height_adv,
@@ -166,15 +177,23 @@ def trials_from_records(records: Sequence[Dict[str, Any]]) -> List[Dict[str, Any
                 "prom": prom,
                 "terrain_los": terrain_los,
                 "mobility": mobility,
+                "spacing_mean": _mean_key(blue_groups, "spacing_mean"),
+                "frontage": _mean_key(blue_groups, "frontage"),
+                "depth": _mean_key(blue_groups, "depth"),
+                "heading_deg": _mean_key(blue_groups, "heading_deg"),
                 "enemy_killed": enemy_killed,
                 "first_shot": first_shot,
                 "first_shot_t": first_shot_t,
+                "first_terrain_los_t": as_float(end.get("first_terrain_los_t")),
+                "first_in_range_t": as_float(end.get("first_in_range_t")),
+                "min_centroid_dist": as_float(end.get("min_centroid_dist")),
                 "hit_rate": hit_rate,
                 "blue_shots": blue_shots,
                 "blue_hits": blue_hits,
                 "red_losses": red_losses,
                 "blue_losses": as_float(end.get("blue_losses")),
                 "n_agent_rows": len(agents),
+                "n_group_rows": len(groups),
                 "n_dyad_rows": len(dyads),
             }
         )
@@ -192,7 +211,9 @@ def fit_causal_graph(records: Sequence[Dict[str, Any]]) -> Dict[str, Any]:
     """Estimate terrain DAG from CausalRecorder kind-schema logs."""
     trials = trials_from_records(records)
     agents = [r for r in records if _kind(r) == "agent"]
+    groups = [r for r in records if _kind(r) == "group"]
     dyads = [r for r in records if _kind(r) == "dyad"]
+    blue_groups = [g for g in groups if as_bool01(g.get("blue")) == 1.0] or groups
     blue_dyads = [d for d in dyads if as_bool01(d.get("a_blue")) == 1.0] or dyads
 
     elev_a = column(agents, "elev")
@@ -228,11 +249,16 @@ def fit_causal_graph(records: Sequence[Dict[str, Any]]) -> Dict[str, Any]:
         "n_rows": len(records),
         "n_trials": len(trials),
         "n_agent_rows": len(agents),
+        "n_group_rows": len(groups),
         "n_dyad_rows": len(dyads),
         "dag": DAG,
         "descriptives": {
             "trials": describe(trials, TRIAL_KEYS),
             "agent": describe(agents, ("elev", "slope_deg", "prom", "disp_rate", "speed")),
+            "group": describe(
+                blue_groups,
+                ("spacing_mean", "frontage", "depth", "heading_deg", "disp_rate"),
+            ),
             "dyad": describe(blue_dyads, ("height_adv", "dist", "terrain_los")),
         },
         "equations": {
@@ -359,6 +385,7 @@ def generate_synthetic_records(n_trials: int = 40, seed: int = 11) -> List[Dict[
                 "trial": trial,
                 "assignment": "randomized",
                 "movement": "Hold",
+                "formation": "None",
                 "seed": seed + trial,
                 "blue_n": 4,
                 "red_n": 6,
@@ -384,6 +411,29 @@ def generate_synthetic_records(n_trials: int = 40, seed: int = 11) -> List[Dict[
                 "prom": prom,
                 "disp_rate": mobility,
                 "speed": mobility,
+            }
+        )
+        rows.append(
+            {
+                "kind": "group",
+                "trial": trial,
+                "t": 0.0,
+                "s": 1,
+                "unit": "blue",
+                "blue": True,
+                "n": 4,
+                "formation": "None",
+                "cx": 0.0,
+                "cy": elev,
+                "cz": 0.0,
+                "elev": elev,
+                "slope_deg": slope_deg,
+                "spacing_mean": 8.0,
+                "spacing_std": 1.0,
+                "frontage": 12.0,
+                "depth": 6.0,
+                "heading_deg": 0.0,
+                "disp_rate": mobility,
             }
         )
         rows.append(
@@ -423,6 +473,9 @@ def generate_synthetic_records(n_trials: int = 40, seed: int = 11) -> List[Dict[
                 "enemy_killed": int(enemy_killed),
                 "blue_hit_rate": hit_rate,
                 "first_shot": int(first_shot),
+                "first_terrain_los_t": 2.0 if terrain_los >= 0.5 else None,
+                "first_in_range_t": 3.0,
+                "min_centroid_dist": 180.0,
             }
         )
     return rows
@@ -496,7 +549,7 @@ def main(argv: List[str] | None = None) -> int:
     if not any(_kind(r) for r in records):
         print(
             f"{path} has no 'kind' field — this fitter is for CausalRecorder logs "
-            "(trial_begin / agent / dyad / shot / death / trial_end).",
+            "(trial_begin / agent / group / dyad / shot / death / trial_end).",
             file=sys.stderr,
         )
         return 2

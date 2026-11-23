@@ -25,7 +25,7 @@ using UnityEngine.AI;
 ///                   points, once per trial, so position is set by the experiment.
 ///
 /// Output is one JSONL file per Play session under [project]/CausalLogs, one row per
-/// line, typed by "kind": trial_begin, agent, dyad, shot, death, trial_end.
+/// line, typed by "kind": trial_begin, agent, group, dyad, shot, death, trial_end.
 /// Fit it with "AGAMOTTO Server/causal/fit_graph.py".
 /// </summary>
 public class AGAMOTTO_CausalRecorder : MonoBehaviour
@@ -51,13 +51,19 @@ public class AGAMOTTO_CausalRecorder : MonoBehaviour
     public RandomizeSide randomize = RandomizeSide.Both;
     [Tooltip("Near pins = jitter around each TAK pin. Cover area = move the whole layout across that box so trials cover terrain.")]
     public PlaceMode place = PlaceMode.CoverArea;
-    public MovementMode movement = MovementMode.Hold;
-    public float maxTrialSeconds = 60f;
+    public MovementMode movement = MovementMode.BlueAdvances;
+    [Tooltip("RIDE formation issued when Blue advances. Logged on trial_begin / group rows; not randomized yet.")]
+    public FormationProcedureType advanceFormation = FormationProcedureType.Wedge;
+    [Tooltip("Simulation seconds for the whole trial, including the walk from TAK spacing to rifle range. "
+             + "A 50 m weapon from ~900 m needs ~10 min of sim time; 400 s times out before contact.")]
+    public float maxTrialSeconds = 1200f;
+    [Tooltip("Treat Blue as in rifle range once the team centroid is this close (m). Not a spawn teleport.")]
+    public float contactStandoffM = 28f;
     [Tooltip("Pause after respawn, with firing off, before the trial clock starts.")]
     public float settleSeconds = 1f;
-    [Tooltip("RIDE sim speed during collection (ITimeSimulationSystem.SetSpeed). 1 = real time. "
-             + "Above ~8, targeting/physics can diverge from 1x.")]
-    public float trialTimeScale = 4f;
+    [Tooltip("RIDE ITimeSimulationSystem.SetSpeed during collection. 1 = real time. "
+             + "Pays for longer Max s in wall-clock; targeting can diverge above ~8.")]
+    public float trialTimeScale = 8f;
 
     [Header("Panel")]
     public bool showPanel = true;
@@ -83,6 +89,13 @@ public class AGAMOTTO_CausalRecorder : MonoBehaviour
         public float prom = float.NaN;
     }
 
+    sealed class GroupLast
+    {
+        public float t;
+        public float x;
+        public float z;
+    }
+
     struct UnitPlan
     {
         public string uid;
@@ -100,11 +113,15 @@ public class AGAMOTTO_CausalRecorder : MonoBehaviour
 
     readonly List<Tracked> _roster = new List<Tracked>();
     readonly Dictionary<RideID, Tracked> _byId = new Dictionary<RideID, Tracked>();
+    readonly Dictionary<string, GroupLast> _groupLast = new Dictionary<string, GroupLast>();
     readonly List<string> _pending = new List<string>();
     readonly int[] _shots = new int[2];
     readonly int[] _hits = new int[2];
     readonly int[] _losses = new int[2];
     readonly float[] _firstShotT = { float.NaN, float.NaN };
+    float _firstTerrainLosT = float.NaN;
+    float _firstInRangeT = float.NaN;
+    float _minCentroidDist = float.NaN;
 
     IEngagementSystem _engagements;
     bool _engagementLookupDone;
@@ -270,26 +287,45 @@ public class AGAMOTTO_CausalRecorder : MonoBehaviour
         }
     }
 
-    void ApplySimRate()
+    void CaptureSimRateBaseline()
+    {
+        if (_simRateApplied)
+            return;
+        ITimeSimulationSystem ts = TryTimeSim();
+        if (ts != null)
+            _savedTimeScale = ts.speed > 0.01f ? ts.speed : 1f;
+        else
+            _savedTimeScale = Time.timeScale > 0.01f ? Time.timeScale : 1f;
+        _simRateApplied = true;
+    }
+
+    void PushSimRate()
     {
         float rate = Mathf.Clamp(trialTimeScale, 0.25f, 20f);
         trialTimeScale = rate;
         ITimeSimulationSystem ts = TryTimeSim();
         if (ts != null)
         {
-            _savedTimeScale = ts.speed > 0.01f ? ts.speed : 1f;
             if (ts.isPaused)
                 ts.Play();
             ts.SetSpeed(rate);
         }
         else
-        {
-            _savedTimeScale = Time.timeScale > 0.01f ? Time.timeScale : 1f;
             Time.timeScale = rate;
-        }
 
-        _simRateApplied = true;
         Debug.Log($"AGAMOTTO_CausalRecorder: RIDE sim rate {rate:0.#}x (timeScale={Time.timeScale:0.#}).");
+    }
+
+    void ApplySimRate()
+    {
+        CaptureSimRateBaseline();
+        PushSimRate();
+    }
+
+    float LiveRideSpeed()
+    {
+        ITimeSimulationSystem ts = TryTimeSim();
+        return ts != null ? ts.speed : float.NaN;
     }
 
     void RestoreSimRate()
@@ -353,8 +389,6 @@ public class AGAMOTTO_CausalRecorder : MonoBehaviour
                 break;
             }
 
-            // Respawn leaves firing off; close to weapon range before the trial clock starts
-            // so Max s is combat time, not walking time.
             Globals.api.attackSystem.flags = CombatHeld;
             yield return new WaitForSeconds(Mathf.Max(0.1f, settleSeconds));
 
@@ -366,17 +400,11 @@ public class AGAMOTTO_CausalRecorder : MonoBehaviour
                 break;
             }
 
-            float approachLimit = Mathf.Max(120f, maxTrialSeconds * 3f);
-            yield return CloseToContact(approachLimit);
-            if (_abortRequested)
-                break;
-
             _passive = false;
+            PushSimRate();
             BeginTrial("randomized", seed, plans);
             Globals.api.attackSystem.flags = CombatOn;
-            SeedEngagements();
-            if (movement == MovementMode.BlueAdvances)
-                OrderBlueAdvance();
+            OrderBlueAdvance();
 
             string outcome = null;
             float nextNudge = 1f;
@@ -387,15 +415,20 @@ public class AGAMOTTO_CausalRecorder : MonoBehaviour
                 else if (Alive(Team.Blue) == 0 || Alive(Team.Red) == 0) outcome = OutcomeFromAlive();
                 else if (TrialTime >= maxTrialSeconds)
                     outcome = (float.IsNaN(_firstShotT[0]) && float.IsNaN(_firstShotT[1])) ? "no_contact" : "timeout";
-                else if (movement == MovementMode.BlueAdvances && TrialTime >= nextNudge)
+                else if (TrialTime >= nextNudge)
                 {
-                    OrderBlueAdvance();
+                    if (CloseEnough())
+                        SeedEngagements();
+                    if (!CloseEnough() || movement == MovementMode.BlueAdvances)
+                        OrderBlueAdvance();
                     nextNudge = TrialTime + 2f;
                 }
             }
 
             EndTrial(outcome);
             Globals.api.attackSystem.flags = CombatHeld;
+            ClearSceneCombatants();
+            yield return null;
             _trialsDone = i + 1;
             _message = $"Trial {_trialsDone}/{total} done ({outcome}).";
         }
@@ -407,9 +440,23 @@ public class AGAMOTTO_CausalRecorder : MonoBehaviour
             _message = $"Aborted after {_trialsDone} complete trial(s).";
     }
 
+    void ClearSceneCombatants()
+    {
+        var groups = new List<RideID>();
+        var creator = AGAMOTTOScenarioCreator.Active;
+        if (creator != null && creator.SpawnedGroups != null)
+        {
+            foreach (KeyValuePair<string, RideID> kv in creator.SpawnedGroups)
+                groups.Add(kv.Value);
+        }
+
+        AGAMOTTO_RideDestroy.DestroyAllCombatants(groups);
+    }
+
     void FinishTrials()
     {
         _trialsRunning = false;
+        ClearSceneCombatants();
         AGAMOTTO_EpisodeRespawn.ClearSceneOffsets();
         RestoreSimRate();
         try
@@ -601,39 +648,6 @@ public class AGAMOTTO_CausalRecorder : MonoBehaviour
             Warn($"cover-area trial {trialIndex + 1}: no on-mesh placement in cell; using TAK points.");
     }
 
-    IEnumerator CloseToContact(float limit)
-    {
-        float t0 = Time.time;
-        int tick = 0;
-        while (!_abortRequested && Time.time - t0 < limit)
-        {
-            RefreshRoster(false);
-            if (AnyPairInRange())
-            {
-                _message = $"In range after {Time.time - t0:0.0}s. Starting trial.";
-                yield break;
-            }
-
-            if (tick == 16 && !AnyPairInRange())
-            {
-                Warn("navmesh close stalled; placing Blue at weapon standoff.");
-                TeleportBlueToStandoff();
-            }
-            else if (tick % 2 == 0)
-                OrderBlueTowardContact();
-            tick++;
-            float dist = BlueRedDistance();
-            _message = float.IsNaN(dist)
-                ? "Closing to contact..."
-                : $"Closing to contact ({Time.time - t0:0}s) dist={dist:0}m";
-            yield return new WaitForSeconds(0.5f);
-        }
-
-        RefreshRoster(false);
-        if (!AnyPairInRange())
-            Warn($"not in weapon range after {limit:0}s close; starting trial anyway.");
-    }
-
     bool AnyPairInRange()
     {
         foreach (Tracked a in _roster)
@@ -652,6 +666,29 @@ public class AGAMOTTO_CausalRecorder : MonoBehaviour
         return false;
     }
 
+    bool CloseEnough()
+    {
+        if (AnyPairInRange())
+            return true;
+        float dist = BlueRedDistance();
+        if (float.IsNaN(dist))
+            return false;
+        float range = FirstOver(Team.Blue, WeaponRange);
+        float limit = ContactStandoff() * 1.5f;
+        if (!float.IsNaN(range) && range > 10f)
+            limit = Mathf.Min(range * 0.9f, Mathf.Max(limit, ContactStandoff() + 8f));
+        return dist <= limit;
+    }
+
+    float ContactStandoff()
+    {
+        float requested = Mathf.Max(8f, contactStandoffM);
+        float range = FirstOver(Team.Blue, WeaponRange);
+        if (float.IsNaN(range) || range < 10f)
+            return requested;
+        return Mathf.Min(requested, range * 0.7f);
+    }
+
     float BlueRedDistance()
     {
         if (!TryCentroid(Team.Blue, null, out Vector3 blue) || !TryCentroid(Team.Red, null, out Vector3 red))
@@ -660,105 +697,94 @@ public class AGAMOTTO_CausalRecorder : MonoBehaviour
         return Vector3.Distance(blue, red);
     }
 
-    void OrderBlueTowardContact()
-    {
-        if (!TryCentroid(Team.Red, null, out Vector3 redC) || !TryCentroid(Team.Blue, null, out Vector3 blueC))
-            return;
-
-        float range = FirstOver(Team.Blue, WeaponRange);
-        if (float.IsNaN(range) || range < 30f)
-            range = 250f;
-        Vector3 delta = blueC - redC;
-        delta.y = 0f;
-        float dist = delta.magnitude;
-        float standoff = Mathf.Clamp(range * 0.55f, 40f, range * 0.85f);
-        if (dist > 1f && dist <= standoff)
-            return;
-
-        Vector3 goal = dist < 1f ? redC : redC + delta.normalized * standoff;
-        IssueBlueMove(goal);
-    }
-
     void OrderBlueAdvance()
     {
         if (!TryCentroid(Team.Red, null, out Vector3 goal))
             return;
         IssueBlueMove(goal);
-    }
-
-    void TeleportBlueToStandoff()
-    {
-        if (!TryCentroid(Team.Red, null, out Vector3 redC) || !TryCentroid(Team.Blue, null, out Vector3 blueC))
-            return;
-        float range = FirstOver(Team.Blue, WeaponRange);
-        if (float.IsNaN(range) || range < 30f)
-            range = 250f;
-        Vector3 delta = blueC - redC;
-        delta.y = 0f;
-        if (delta.sqrMagnitude < 1f)
-            delta = Vector3.forward;
-        float standoff = Mathf.Clamp(range * 0.55f, 40f, range * 0.85f);
-        Vector3 goal = redC + delta.normalized * standoff;
-        Vector3 shift = goal - blueC;
-        shift.y = 0f;
-        ITransformSystem ts;
-        try { ts = Globals.api.GetSystem<ITransformSystem>(); }
-        catch (Exception) { return; }
-        if (ts == null)
-            return;
-
-        foreach (Tracked a in _roster)
-        {
-            if (!a.alive || a.team != Team.Blue || !TryPosition(a.id, out Vector3 p))
-                continue;
-            float x = p.x + shift.x;
-            float z = p.z + shift.z;
-            if (!TryTerrainHeight(x, z, out float h))
-                h = p.y;
-            try { ts.SetPosition(a.id, new RideVector3(x, h, z)); }
-            catch (Exception) { /* skip this soldier */ }
-        }
+        float dist = BlueRedDistance();
+        _message = float.IsNaN(dist)
+            ? "Blue advancing..."
+            : $"Blue advancing ({TrialTime:0}s) dist={dist:0}m";
     }
 
     void IssueBlueMove(Vector3 goal)
     {
-        var creator = AGAMOTTOScenarioCreator.Active;
-        if (creator == null || creator.SpawnedGroups == null)
-            return;
         if (!TryTerrainHeight(goal.x, goal.z, out float h))
             h = goal.y;
         var dest = new RideVector3(goal.x, h, goal.z);
         var movers = Globals.api.movementSystem;
-
-        foreach (KeyValuePair<string, RideID> kv in creator.SpawnedGroups)
+        var creator = AGAMOTTOScenarioCreator.Active;
+        if (creator != null && creator.SpawnedGroups != null)
         {
-            if (!AGAMOTTO_EpisodeRespawn.TryGetSpec(kv.Key, out var spec) || !IsBlueCot(spec.CotType))
+            foreach (KeyValuePair<string, RideID> kv in creator.SpawnedGroups)
+            {
+                if (!AGAMOTTO_EpisodeRespawn.TryGetSpec(kv.Key, out var spec) || !IsBlueCot(spec.CotType))
+                    continue;
+                try
+                {
+                    movers.MoveToPositionInFormation(kv.Value, dest, advanceFormation);
+                }
+                catch (Exception)
+                {
+                    try
+                    {
+                        if (!TryCentroid(Team.Blue, kv.Key, out Vector3 start))
+                            continue;
+                        movers.MoveGroupPath(
+                            kv.Value,
+                            new RideVector3[] { start, dest },
+                            advanceFormation);
+                    }
+                    catch (Exception ex)
+                    {
+                        Warn("advance order failed: " + ex.Message);
+                    }
+                }
+            }
+        }
+
+        var ids = new List<RideID>();
+        foreach (Tracked a in _roster)
+        {
+            if (a.alive && a.team == Team.Blue)
+                ids.Add(a.id);
+        }
+
+        if (ids.Count == 0)
+            return;
+
+        try
+        {
+            movers.MoveToPosition(ids.ToArray(), dest, advanceFormation);
+            return;
+        }
+        catch (Exception)
+        {
+            // per-agent path below
+        }
+
+        foreach (RideID id in ids)
+        {
+            if (!TryPosition(id, out Vector3 start))
                 continue;
             try
             {
-                movers.MoveToPositionInFormation(kv.Value, dest, FormationProcedureType.Wedge);
+                movers.MovePath(id, new RideVector3[] { start, dest }, 1);
             }
             catch (Exception)
             {
-                try
-                {
-                    if (!TryCentroid(Team.Blue, kv.Key, out Vector3 start))
-                        continue;
-                    movers.MoveGroupPath(
-                        kv.Value,
-                        new RideVector3[] { start, dest },
-                        FormationProcedureType.Wedge);
-                }
-                catch (Exception ex)
-                {
-                    Warn("advance order failed: " + ex.Message);
-                }
+                // this soldier has no path; others may still move
             }
         }
     }
 
     void SeedEngagements()
     {
+        float range = FirstOver(Team.Blue, WeaponRange);
+        if (float.IsNaN(range) || range < 10f)
+            range = 50f;
+
         foreach (Tracked a in _roster)
         {
             if (!a.alive || a.team != Team.Blue)
@@ -769,16 +795,14 @@ public class AGAMOTTO_CausalRecorder : MonoBehaviour
             {
                 if (!b.alive || b.team != Team.Red)
                     continue;
-                if (InRange(a.id, b.id) != true)
-                    continue;
                 if (!TryPosition(a.id, out Vector3 ap) || !TryPosition(b.id, out Vector3 bp))
                     continue;
                 float d = Vector3.Distance(ap, bp);
-                if (d < bestDist)
-                {
-                    bestDist = d;
-                    best = b;
-                }
+                bool inRange = InRange(a.id, b.id) == true || d <= range * 0.95f;
+                if (!inRange || d >= bestDist)
+                    continue;
+                bestDist = d;
+                best = b;
             }
 
             if (best == null)
@@ -809,6 +833,10 @@ public class AGAMOTTO_CausalRecorder : MonoBehaviour
 
         _trialId++;
         _sampleIndex = 0;
+        _groupLast.Clear();
+        _firstTerrainLosT = float.NaN;
+        _firstInRangeT = float.NaN;
+        _minCentroidDist = BlueRedDistance();
         for (int i = 0; i < 2; i++)
         {
             _shots[i] = 0;
@@ -835,6 +863,7 @@ public class AGAMOTTO_CausalRecorder : MonoBehaviour
             .S("assignment", assignment)
             .I("seed", seed)
             .S("movement", assignment == "randomized" ? movement.ToString() : "AsOrdered")
+            .S("formation", CommandedFormationLabel())
             .S("randomize", assignment == "randomized" ? randomize.ToString() : "None")
             .S("place", assignment == "randomized" ? place.ToString() : "AsPlaced")
             .F("offset_radius_m", assignment == "randomized" ? offsetRadiusM : 0f)
@@ -842,6 +871,7 @@ public class AGAMOTTO_CausalRecorder : MonoBehaviour
             .F("sample_interval_s", sampleIntervalS)
             .F("time_scale", Time.timeScale)
             .F("sim_rate", trialTimeScale)
+            .F("ride_speed", LiveRideSpeed())
             .I("blue_n", Alive(Team.Blue))
             .I("red_n", Alive(Team.Red))
             .F("init_dist", haveBlue && haveRed ? Vector3.Distance(blueC, redC) : float.NaN)
@@ -918,6 +948,9 @@ public class AGAMOTTO_CausalRecorder : MonoBehaviour
             .I("enemy_killed", enemyKilled ? 1 : 0)
             .I("first_shot", firstShot ? 1 : 0)
             .F("blue_hit_rate", hitRate)
+            .F("first_terrain_los_t", _firstTerrainLosT)
+            .F("first_in_range_t", _firstInRangeT)
+            .F("min_centroid_dist", _minCentroidDist)
             .End());
         Flush();
     }
@@ -1075,6 +1108,9 @@ public class AGAMOTTO_CausalRecorder : MonoBehaviour
             }
         }
 
+        WriteGroupRows(t);
+        NoteApproach();
+
         if (_pending.Count >= FlushEveryLines)
             Flush();
     }
@@ -1140,6 +1176,16 @@ public class AGAMOTTO_CausalRecorder : MonoBehaviour
 
     void WriteDyadRow(Tracked a, Tracked b, float t)
     {
+        bool? los = TerrainLos(a.view, b.view);
+        bool? inRange = InRange(a.id, b.id);
+        if (a.team == Team.Blue)
+        {
+            if (los == true && float.IsNaN(_firstTerrainLosT))
+                _firstTerrainLosT = t;
+            if (inRange == true && float.IsNaN(_firstInRangeT))
+                _firstInRangeT = t;
+        }
+
         Write(new Row("dyad")
             .I("trial", _trialId)
             .F("t", t)
@@ -1153,11 +1199,224 @@ public class AGAMOTTO_CausalRecorder : MonoBehaviour
             .F("b_elev", b.elev)
             .F("a_prom", a.prom)
             .F("b_prom", b.prom)
-            .B("terrain_los", TerrainLos(a.view, b.view))
+            .B("terrain_los", los)
             .B("visible", RideVisible(a, b))
-            .B("in_range", InRange(a.id, b.id))
+            .B("in_range", inRange)
             .B("engaged", Engaged(a.id, b.id))
             .End());
+    }
+
+    void WriteGroupRows(float t)
+    {
+        var buckets = new Dictionary<string, List<Tracked>>();
+        foreach (Tracked a in _roster)
+        {
+            if (!a.sampled)
+                continue;
+            string key = GroupKey(a);
+            if (!buckets.TryGetValue(key, out List<Tracked> members))
+            {
+                members = new List<Tracked>();
+                buckets[key] = members;
+            }
+            members.Add(a);
+        }
+
+        foreach (KeyValuePair<string, List<Tracked>> kv in buckets)
+            WriteGroupRow(kv.Key, kv.Value, t);
+    }
+
+    void WriteGroupRow(string key, List<Tracked> members, float t)
+    {
+        if (members.Count == 0)
+            return;
+
+        Team team = members[0].team;
+        float cx = 0f, cy = 0f, cz = 0f, elevSum = 0f, slopeSum = 0f;
+        int elevN = 0, slopeN = 0;
+        foreach (Tracked a in members)
+        {
+            cx += a.pos.x;
+            cy += a.pos.y;
+            cz += a.pos.z;
+            if (!float.IsNaN(a.elev))
+            {
+                elevSum += a.elev;
+                elevN++;
+            }
+            if (!float.IsNaN(a.slopeDeg))
+            {
+                slopeSum += a.slopeDeg;
+                slopeN++;
+            }
+        }
+        float n = members.Count;
+        cx /= n;
+        cy /= n;
+        cz /= n;
+
+        float dispRate = float.NaN;
+        float headingDeg = float.NaN;
+        if (_groupLast.TryGetValue(key, out GroupLast last) && t - last.t > 1e-3f)
+        {
+            float dt = t - last.t;
+            float dx = cx - last.x;
+            float dz = cz - last.z;
+            float dist = Mathf.Sqrt(dx * dx + dz * dz);
+            dispRate = dist / dt;
+            if (dist > 0.05f)
+                headingDeg = Mathf.Atan2(dx, dz) * Mathf.Rad2Deg;
+        }
+        if (float.IsNaN(headingDeg))
+            TryPrincipalHeading(members, out headingDeg);
+
+        PairwiseSpacing(members, out float spacingMean, out float spacingStd);
+        ExtentAlong(members, headingDeg, out float depth, out float frontage);
+
+        if (!_groupLast.TryGetValue(key, out last))
+        {
+            last = new GroupLast();
+            _groupLast[key] = last;
+        }
+        last.t = t;
+        last.x = cx;
+        last.z = cz;
+
+        Write(new Row("group")
+            .I("trial", _trialId)
+            .F("t", t)
+            .I("s", _sampleIndex)
+            .S("unit", members[0].unit)
+            .B("blue", team == Team.Blue)
+            .I("n", members.Count)
+            .S("formation", CommandedFormationFor(team))
+            .F("cx", cx)
+            .F("cy", cy)
+            .F("cz", cz)
+            .F("elev", elevN > 0 ? elevSum / elevN : float.NaN)
+            .F("slope_deg", slopeN > 0 ? slopeSum / slopeN : float.NaN)
+            .F("spacing_mean", spacingMean)
+            .F("spacing_std", spacingStd)
+            .F("frontage", frontage)
+            .F("depth", depth)
+            .F("heading_deg", headingDeg)
+            .F("disp_rate", dispRate)
+            .End());
+    }
+
+    void NoteApproach()
+    {
+        float d = BlueRedDistance();
+        if (float.IsNaN(d))
+            return;
+        if (float.IsNaN(_minCentroidDist) || d < _minCentroidDist)
+            _minCentroidDist = d;
+    }
+
+    string CommandedFormationLabel()
+    {
+        if (_passive || movement != MovementMode.BlueAdvances)
+            return "None";
+        return advanceFormation.ToString();
+    }
+
+    string CommandedFormationFor(Team team)
+    {
+        return team == Team.Blue ? CommandedFormationLabel() : "None";
+    }
+
+    static string GroupKey(Tracked a) => (a.team == Team.Blue ? "1:" : "0:") + (a.unit ?? "");
+
+    static void PairwiseSpacing(List<Tracked> members, out float mean, out float std)
+    {
+        mean = float.NaN;
+        std = float.NaN;
+        int n = members.Count;
+        if (n < 2)
+            return;
+
+        double sum = 0;
+        double sumSq = 0;
+        int pairs = 0;
+        for (int i = 0; i < n; i++)
+        {
+            for (int j = i + 1; j < n; j++)
+            {
+                float dx = members[i].pos.x - members[j].pos.x;
+                float dz = members[i].pos.z - members[j].pos.z;
+                float d = Mathf.Sqrt(dx * dx + dz * dz);
+                sum += d;
+                sumSq += d * d;
+                pairs++;
+            }
+        }
+
+        mean = (float)(sum / pairs);
+        if (pairs < 2)
+        {
+            std = 0f;
+            return;
+        }
+        double var = (sumSq - sum * sum / pairs) / (pairs - 1);
+        std = var > 0.0 ? (float)Math.Sqrt(var) : 0f;
+    }
+
+    static bool TryPrincipalHeading(List<Tracked> members, out float headingDeg)
+    {
+        headingDeg = float.NaN;
+        int n = members.Count;
+        if (n < 2)
+            return false;
+
+        float mx = 0f, mz = 0f;
+        foreach (Tracked a in members)
+        {
+            mx += a.pos.x;
+            mz += a.pos.z;
+        }
+        mx /= n;
+        mz /= n;
+
+        float sxx = 0f, szz = 0f, sxz = 0f;
+        foreach (Tracked a in members)
+        {
+            float dx = a.pos.x - mx;
+            float dz = a.pos.z - mz;
+            sxx += dx * dx;
+            szz += dz * dz;
+            sxz += dx * dz;
+        }
+        if (sxx + szz < 1e-4f)
+            return false;
+
+        float alpha = 0.5f * Mathf.Atan2(2f * sxz, sxx - szz);
+        headingDeg = Mathf.Atan2(Mathf.Cos(alpha), Mathf.Sin(alpha)) * Mathf.Rad2Deg;
+        return true;
+    }
+
+    static void ExtentAlong(List<Tracked> members, float headingDeg, out float depth, out float frontage)
+    {
+        depth = float.NaN;
+        frontage = float.NaN;
+        if (members.Count < 2 || float.IsNaN(headingDeg))
+            return;
+
+        float rad = headingDeg * Mathf.Deg2Rad;
+        float hx = Mathf.Sin(rad);
+        float hz = Mathf.Cos(rad);
+        float alongMin = float.PositiveInfinity, alongMax = float.NegativeInfinity;
+        float acrossMin = float.PositiveInfinity, acrossMax = float.NegativeInfinity;
+        foreach (Tracked a in members)
+        {
+            float along = a.pos.x * hx + a.pos.z * hz;
+            float across = -a.pos.x * hz + a.pos.z * hx;
+            if (along < alongMin) alongMin = along;
+            if (along > alongMax) alongMax = along;
+            if (across < acrossMin) acrossMin = across;
+            if (across > acrossMax) acrossMax = across;
+        }
+        depth = alongMax - alongMin;
+        frontage = acrossMax - acrossMin;
     }
 
     // ---------------------------------------------------------------- shots
