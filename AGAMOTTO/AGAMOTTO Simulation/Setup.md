@@ -98,11 +98,7 @@ In Unity:
 Ride > Terrain > Config File - Terrain Key
 ```
 
-Use the following key:
-
-```text
-your-ride-terrain-key
-```
+Enter the terrain key issued for your own RIDE account. Do not commit that key to this repository.
 
 ---
 
