@@ -111,7 +111,7 @@ Legacy: `agamotto_post_train.py` only re-runs setup/inference from an existing `
 | `agamotto_inference_common.py` | Shared ONNX copy, `active_run.json`, Unity inference runner |
 | `agamotto_post_train.py` | Re-run SAC inference setup from existing results (optional) |
 | `tak_feedback.py` | JSON messages to WinTAK plugin (port 65433) |
-| `causal/fit_graph.py` | Fit terrain SCM from CausalRecorder JSONL |
+| `causal/fit_graph.py` | Fit RIDE combat SCM from CausalRecorder JSONL |
 | `requirements-awac.txt` | Python deps for SAC trainer |
 | `EYE_OF_AGAMOTTO_RL/` | Legacy RL experiments |
 
@@ -147,7 +147,7 @@ After training, one **inference episode** runs automatically. Unity samples the 
 
 ---
 
-## Terrain causal OE (v1)
+## RIDE combat causal OE (v1)
 
 Evaluation + F8 `CausalRecorder` writes `AGAMOTTO Simulation/CausalLogs/causal_*.jsonl`. Fit:
 

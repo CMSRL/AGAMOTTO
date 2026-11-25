@@ -1,22 +1,22 @@
-# Terrain causal OE (v1)
+# RIDE combat causal OE (v1)
 
-RIDE is the testbed. WinTAK places a real tactical layout; Unity records what RIDE’s combat model does on that terrain. Python fits a small SCM. **Evaluation mode only — no ML-Agents.**
+RIDE is the testbed. WinTAK places a real tactical layout; Unity records what RIDE’s combat model does. Python fits a small SCM. **Evaluation mode only — no ML-Agents.**
+
+RIDE’s hit calculator uses range, occlusion, skill, suppression, target posture, and relative speed. Terrain height is a map check, not the combat path.
 
 ## DAG
 
 ```
-elev -> slope_deg
-elev -> prom
-height_adv -> terrain_los
-slope_deg -> mobility
-terrain_los -> first_shot
-terrain_los -> hit_rate
-terrain_los -> enemy_killed
+elev -> slope_deg                         map check only
+
+dist -> in_range -> first_shot
+visible -> first_shot
+dist, skill, suppression, b_exposure, rel_speed -> p_hit_sim -> hit -> enemy_killed
+force_ratio -> enemy_killed, blue_losses
+depth -> n_in_contact, blue_losses
 ```
 
-Covariates come from RIDE `ITerrainSystem` (height, local slope, prominence, `RaycastTerrain` LOS). Outcomes are trial-level combat results (`trial_end`).
-
-Hold vs BlueAdvances: **Hold** is the cleanest identification (position is the intervention; mobility stays near zero). **BlueAdvances** adds `slope_deg -> mobility` as a mediator.
+`p_hit_sim` is `AttackSystem.CalculateAccuracy`. `visible` is RIDE occlusion (`RideUtils.IsObjectOccluded`), not the ground-only `terrain_los` ray. `b_exposure` is the posture factor (stand 1, crouch 0.25, prone 0.1). The fit also reports `height_adv -> p_hit_sim` alone so a run can show whether height is in the hit model.
 
 ## Collect logs
 
@@ -44,10 +44,10 @@ python causal\fit_graph.py "..\AGAMOTTO Simulation\CausalLogs\causal_YYYYMMDD_HH
 
 The script prints:
 
-- `elev -> slope_deg` / `elev -> prom`
-- `height_adv -> terrain_los`
-- `slope_deg -> mobility`
-- `terrain_los -> enemy_killed` (unadjusted ATE) and `terrain_los -> first_shot` / `hit_rate`
+- `elev -> slope_deg` (map check)
+- shot `dist` / `b_exposure` / `suppression` → `p_hit_sim`, and `height_adv -> p_hit_sim` alone
+- `p_hit_sim -> hit`
+- `force_ratio -> enemy_killed`, `depth -> blue_losses`, `depth -> n_in_contact`
 
 and writes `<jsonl>.report.json`.
 
